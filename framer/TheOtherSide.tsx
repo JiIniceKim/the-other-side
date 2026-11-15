@@ -30,7 +30,7 @@ const TEXT = "#F3EDE4"
 
 type ObjId = "phone" | "laptop" | "bills" | "calendar" | "door"
 type Stats = { money: number; energy: number; grade: number }
-type Phase = "profile" | "intro" | "feed" | "transit" | "room" | "watched" | "yourpost" | "notify" | "yourmove" | "ending"
+type Phase = "profile" | "intro" | "feed" | "transit" | "room" | "watched" | "toStudent" | "yourpost" | "toViewer" | "notify" | "yourmove" | "ending"
 
 interface Comment {
     id: string
@@ -441,6 +441,7 @@ const CSS = `
 .tos .hot .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,240,220,.95);box-shadow:0 0 10px rgba(255,210,150,.9)}
 .tos .hot.seen .ring{border-color:rgba(255,240,220,.28)}
 .tos .hot.seen .dot{background:rgba(255,240,220,.4);box-shadow:none}
+.tos .hot.nearby:not(.target) .ring{border-color:rgba(110,123,255,.62);box-shadow:0 0 12px rgba(51,70,255,.22)}\n.tos .hot.nearby:not(.target) .dot{background:#aeb5ff;box-shadow:0 0 8px rgba(110,123,255,.7)}\n.tos .hot.target .lbl{opacity:1;transform:translateX(-50%) translateY(0)}
 .tos .hot:hover .ring,.tos .hot:focus-visible .ring{inset:9px}
 .tos .hot.target .ring{border:2px solid ${BLUE_GLOW};box-shadow:0 0 16px ${BLUE};animation:tosPulse 1.4s ease-out infinite}
 .tos .hot.target .dot{background:#fff;box-shadow:0 0 12px ${BLUE_GLOW}}
@@ -829,7 +830,7 @@ function RoomSVG(props: { beat: number; buzz: boolean }) {
                         const wx = 160 + bx * 130 + (k % 3) * 34
                         const wy = 186 - bx * 20 + Math.floor(k / 3) * 58
                         const viewer = bx === 1 && k === 4
-                        const watcher = beat >= 2 && (k + bx) % 4 === 1
+                        const watcher = false
                         return (
                             <g key={k}>
                                 <rect x={wx} y={wy} width="22" height="30" fill={viewer || watcher ? BLUE_GLOW : morning ? "#3d455a" : "#1a1f2c"} />
@@ -1006,13 +1007,6 @@ export default function TheOtherSide(props: Props) {
     const prof = profile || DEFAULT_PROFILE
 
     useEffect(() => {
-        const saved = safeGet("tos.comment")
-        if (saved) {
-            startTransition(() => {
-                setNewComment(saved)
-                setDone(true)
-            })
-        }
         if (safeGet("tos.coach")) setCoachSeen(true)
         setProfile(loadProfile())
     }, [])
@@ -1056,7 +1050,7 @@ export default function TheOtherSide(props: Props) {
     const [loading, setLoading] = useState(startAt === "intro")
     const [crowdLit, setCrowdLit] = useState(0)
     const beginIntro = () => {
-        if (introStep !== 0) return
+        if (introStep !== 0 || loading) return
         setIntroStep(1)
     }
     useEffect(() => {
@@ -1079,7 +1073,7 @@ export default function TheOtherSide(props: Props) {
         safeSet("tos.profile", JSON.stringify(p))
         startTransition(() => {
             setPhase("intro")
-            setIntroStep(1)
+            setIntroStep(0)
         })
     }
 
@@ -1123,10 +1117,11 @@ export default function TheOtherSide(props: Props) {
     }, [phase, beat, roomStage, reduce])
     // an object only becomes clickable after a thought has pointed at it
     useEffect(() => {
-        if (phase !== "room" || !target || unlocked.includes(target)) return
+        // wait until the open card is closed, so the next object never lights up behind it
+        if (phase !== "room" || !target || unlocked.includes(target) || open || outcome) return
         const t = window.setTimeout(() => setUnlocked((u) => (u.includes(target) ? u : [...u, target])), reduce ? 0 : 1100)
         return () => window.clearTimeout(t)
-    }, [phase, target, unlocked, reduce])
+    }, [phase, target, unlocked, reduce, open, outcome])
     useEffect(() => {
         if (phase !== "room" || open || outcome) return
         setHint(null)
@@ -1144,7 +1139,7 @@ export default function TheOtherSide(props: Props) {
         }
         setWatchStep(0)
         setWatchers(0)
-        const ts = [1600, 2600, 3600, 5600, 7400].map((ms, i) => window.setTimeout(() => setWatchStep(i + 1), ms))
+        const ts = [900, 1500, 2100, 3000, 3700].map((ms, i) => window.setTimeout(() => setWatchStep(i + 1), ms))
         return () => ts.forEach((t) => window.clearTimeout(t))
     }, [phase, reduce])
     useEffect(() => {
@@ -1209,23 +1204,44 @@ export default function TheOtherSide(props: Props) {
         setEndStep(0)
         startTransition(() => setPhase("ending"))
     }
-    const endToFeed = () => {
-        setDone(true)
+    const replayAll = () => {
         startTransition(() => {
-            setPhase("feed")
-            setDrawer(true)
+            resetRun()
             setLiked(null)
+            setDone(false)
+            setDrawer(false)
+            setNewComment(null)
+            setCrowdLit(0)
+            setIntroStep(0)
+            setEndStep(0)
+            setPhase("profile")
         })
     }
+    // ending: the line → the windows go dark → the title card
     useEffect(() => {
-        if (phase !== "ending") return
-        const t = window.setTimeout(() => setEndStep(1), reduce ? 100 : 2600)
+        if (phase !== "ending" || endStep >= 3) return
+        const wait = [2400, 3000, 1500][endStep]
+        const t = window.setTimeout(() => setEndStep((n) => n + 1), reduce ? 100 : wait)
         return () => window.clearTimeout(t)
-    }, [phase, reduce])
+    }, [phase, endStep, reduce])
     useEffect(() => {
         if (phase !== "notify") return
         const t = window.setTimeout(ding, reduce ? 200 : 1800)
         return () => window.clearTimeout(t)
+    }, [phase, reduce])
+
+    /* ── bridges: into the student's window → out to the building → into your window ── */
+    const [viewStep, setViewStep] = useState(0)
+    useEffect(() => {
+        if (phase === "toStudent") {
+            const t = window.setTimeout(() => setPhase("yourpost"), reduce ? 200 : 2100)
+            return () => window.clearTimeout(t)
+        }
+        if (phase !== "toViewer") return
+        setViewStep(0)
+        const seq = reduce ? [100, 200, 400] : [700, 2400, 4500]
+        const ts = seq.map((ms, i) => window.setTimeout(() => (i < 2 ? setViewStep(i + 1) : setPhase("notify")), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
     }, [phase, reduce])
 
     /* ── facade state per phase ── */
@@ -1262,6 +1278,25 @@ export default function TheOtherSide(props: Props) {
             WATCH_ORDER.slice(0, watchers).forEach((k) => (lit[k] = "watcher"))
             focus = STUDENT
             duration = 1.6
+        } else if (phase === "toStudent") {
+            lit[s] = "amber"
+            WATCH_ORDER.slice(0, 60).forEach((k) => (lit[k] = "watcher"))
+            level = "inside"
+            focus = STUDENT
+            duration = 1.9
+        } else if (phase === "toViewer") {
+            lit[s] = "amber"
+            lit[v] = "watcher"
+            if (viewStep === 0) {
+                level = "near" // never start from "inside": a 20× SVG fails to paint while zooming out
+                focus = STUDENT
+            } else if (viewStep === 1) {
+                duration = 1.6
+            } else {
+                level = "near"
+                focus = VIEWER
+                duration = 1.9
+            }
         } else if (phase === "notify" || phase === "yourmove") {
             lit[v] = "watcher"
             lit[s] = "amber"
@@ -1269,18 +1304,20 @@ export default function TheOtherSide(props: Props) {
             level = "near"
             duration = 2.2
         } else if (phase === "ending") {
-            lit[v] = "watcher"
-            lit[s] = "amber"
+            if (endStep < 2) {
+                lit[v] = "watcher"
+                lit[s] = "amber"
+            }
             duration = 2.4
         }
         const reticleAt: Spot | null = phase === "watched" && watchStep >= 1 ? STUDENT : null
         return { lit, level, focus, duration, reticleAt }
-    }, [phase, introStep, transitStep, watchers, watchStep, crowdLit])
+    }, [phase, introStep, transitStep, watchers, watchStep, crowdLit, endStep, viewStep])
 
-    const showFacade = phase === "profile" || phase === "intro" || phase === "feed" || (phase === "transit" && transitStep < 4) || phase === "watched" || phase === "notify" || phase === "yourmove" || phase === "ending"
-    const progress = phase === "profile" || phase === "intro" || phase === "feed" ? 0 : phase === "transit" || phase === "room" ? 1 : phase === "watched" ? 2 : 3
+    const showFacade = phase === "profile" || phase === "intro" || phase === "feed" || (phase === "transit" && transitStep < 4) || phase === "watched" || phase === "toStudent" || phase === "toViewer" || phase === "notify" || phase === "yourmove" || phase === "ending"
+    const progress = phase === "profile" || phase === "intro" || phase === "feed" ? 0 : phase === "transit" || phase === "room" ? 1 : phase === "watched" || phase === "toStudent" ? 2 : phase === "yourpost" ? 3 : 4
     const behindPhone = phase === "feed" || phase === "yourmove" || phase === "profile"
-    const facadeKey = phase === "watched" ? "fw" : phase === "ending" ? "fe" : phase === "notify" || phase === "yourmove" ? "fn" : "fm"
+    const facadeKey = phase === "watched" || phase === "toStudent" ? "fw" : phase === "ending" ? "fe" : phase === "toViewer" || phase === "notify" || phase === "yourmove" ? "fn" : "fm"
     const finalCaption = picks[2]?.id === "stay" ? "on academic probation lol 💀 #college" : caption
 
     return (
@@ -1304,8 +1341,8 @@ export default function TheOtherSide(props: Props) {
                 </motion.div>
             )}
 
-            {phase !== "profile" && phase !== "intro" && phase !== "feed" && phase !== "yourmove" && (
-                <TopBar progress={progress} onBack={toFeed} onSkip={phase === "transit" ? () => setPhase("room") : phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : phase === "yourpost" ? () => setPhase("notify") : undefined} />
+            {phase !== "profile" && phase !== "intro" && phase !== "feed" && phase !== "yourmove" && phase !== "ending" && (
+                <TopBar progress={progress} onBack={toFeed} onSkip={phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : phase === "yourpost" ? () => setPhase("toViewer") : undefined} />
             )}
 
             <AnimatePresence>{loading && (phase === "profile" || phase === "intro") && <Loader onDone={() => setLoading(false)} reduce={reduce} />}</AnimatePresence>
@@ -1321,7 +1358,7 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "intro" && (
                     <motion.div key="intro" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
-                        <Intro step={introStep} onBegin={() => !loading && beginIntro()} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} onLens={(x, y) => introStep === 0 && setLensPos({ x, y })} />
+                        <Intro step={introStep} onBegin={beginIntro} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} onLens={(x, y) => introStep === 0 && setLensPos({ x, y })} />
                     </motion.div>
                 )}
 
@@ -1348,7 +1385,7 @@ export default function TheOtherSide(props: Props) {
                 )}
 
                 {phase === "transit" && (
-                    <motion.div key="transit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} onClick={() => setPhase("room")} style={{ position: "absolute", inset: 0, cursor: "pointer" }}>
+                    <motion.div key="transit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0, cursor: "default", userSelect: "none" }}>
                         <AnimatePresence>
                             {transitStep >= 3 && (
                                 <motion.div key="pov" initial={startAt === "pov" ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ position: "absolute", inset: 0 }}>
@@ -1361,7 +1398,8 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "room" && (
                     <motion.div key="room" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.7 }} style={{ position: "absolute", inset: 0 }}>
-                        <Room beat={beat} visited={visited} target={target} hint={hint} onOpen={openObj} reduce={reduce} flash={flash} pops={roomStage >= 1 && beat === 0 && !open && picks.length === 0} unlocked={unlocked} />
+                        <Room beat={beat} visited={visited} target={target} hint={hint} onOpen={openObj} reduce={reduce} flash={flash} pops={roomStage >= 1 && beat === 0 && !open && picks.length === 0} unlocked={unlocked} picks={picks} blocked={!!open || !!outcome} />
+                        <ScreenAudience picks={picks} reduce={reduce} />
                         <Hud stats={stats} clock={CLOCK[beat]} reduce={reduce} />
                         <ObjectCard open={open} beat={beat} stats={stats} outcome={outcome} onChoose={choose} onClose={() => setOpen(null)} onNext={afterOutcome} reduce={reduce} />
                         <AnimatePresence mode="wait">
@@ -1396,13 +1434,13 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "watched" && (
                     <motion.div key="watched" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} style={{ position: "absolute", inset: 0 }}>
-                        <WatchedOverlay step={watchStep} picks={picks} liked={likedComment} watchers={watchers} reduce={reduce} onNext={() => setPhase("yourpost")} />
+                        <WatchedOverlay step={watchStep} picks={picks} liked={likedComment} watchers={watchers} reduce={reduce} onNext={() => setPhase("toStudent")} />
                     </motion.div>
                 )}
 
                 {phase === "yourpost" && (
                     <motion.div key="yourpost" initial={startAt === "yourpost" ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} style={{ position: "absolute", inset: 0 }}>
-                        <YourPostPOV profile={prof} likedId={(liked || "c1") as CommentId} reduce={reduce} still={startAt === "yourpost"} onDone={() => setPhase("notify")} />
+                        <YourPostPOV profile={prof} likedId={(liked || "c1") as CommentId} reduce={reduce} still={startAt === "yourpost"} onDone={() => setPhase("toViewer")} />
                     </motion.div>
                 )}
 
@@ -1444,7 +1482,7 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "ending" && (
                     <motion.div key="ending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
-                        <Ending step={endStep} onFeed={endToFeed} reduce={reduce} />
+                        <Ending step={endStep} onReplay={replayAll} handle={prof.name} reduce={reduce} />
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -1953,16 +1991,21 @@ function BlurredRoom(props: { beat: number; sharp?: boolean; reduce: boolean }) 
 }
 
 /* a comment row, the way every app draws one */
-function CommentRow(props: { handle: string; text: string; count: number; liked?: boolean; pop?: boolean; size?: "s" | "m"; onHeart?: () => void; heartLabel?: string; note?: string; pulse?: boolean; reduce?: boolean }) {
-    const { handle, text, count, liked, pop, size = "s", onHeart, heartLabel, note, pulse, reduce } = props
+function CommentRow(props: { handle: string; text: string; count: number; liked?: boolean; pop?: boolean; size?: "s" | "m"; onHeart?: () => void; heartLabel?: string; note?: string; pulse?: boolean; glow?: boolean; dim?: boolean; bump?: boolean; reduce?: boolean }) {
+    const { handle, text, count, liked, pop, size = "s", onHeart, heartLabel, note, pulse, glow, dim, bump, reduce } = props
     const fs = size === "s" ? 12 : 14
     const heart = (
-        <motion.span animate={pop && !reduce ? { scale: [1, 1.7, 1] } : pulse && !reduce ? { scale: [1, 1.18, 1] } : { scale: 1 }} transition={pulse && !pop ? { duration: 1.2, repeat: Infinity } : { duration: 0.45 }} style={{ display: "grid", color: liked ? BLUE_GLOW : "#7c7f8a" }}>
+        <motion.span animate={(pop || bump) && !reduce ? { scale: [1, 1.7, 1] } : pulse && !reduce ? { scale: [1, 1.18, 1] } : { scale: 1 }} transition={pulse && !pop ? { duration: 1.2, repeat: Infinity } : { duration: 0.45 }} style={{ display: "grid", color: liked || bump ? BLUE_GLOW : "#7c7f8a", transition: "color .4s" }}>
             <Icon name="heart" size={size === "s" ? 13 : 18} fill={!!liked} />
         </motion.span>
     )
     return (
-        <div style={{ display: "flex", gap: 8, padding: size === "s" ? "6px 4px" : "8px 6px", alignItems: "flex-start" }}>
+        <motion.div
+            initial={false}
+            animate={glow && !reduce ? { boxShadow: ["0 0 10px rgba(110,123,255,.12)", "0 0 26px rgba(110,123,255,.32)"] } : { boxShadow: "0 0 0px rgba(110,123,255,0)" }}
+            transition={glow ? { duration: 2.4, repeat: Infinity, repeatType: "reverse" } : { duration: 0.4 }}
+            style={{ display: "flex", gap: 8, padding: size === "s" ? "6px 6px" : "8px 8px", alignItems: "flex-start", borderRadius: 12, background: glow ? "rgba(51,70,255,.14)" : "transparent", opacity: dim ? 0.32 : 1, transition: "opacity .7s ease, background .7s ease" }}
+        >
             <span aria-hidden="true" style={{ width: size === "s" ? 18 : 26, height: size === "s" ? 18 : 26, borderRadius: 99, background: "rgba(255,255,255,.14)", flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: fs - 2, color: "#9a9da8" }}>@{handle}</div>
@@ -1977,10 +2020,23 @@ function CommentRow(props: { handle: string; text: string; count: number; liked?
             ) : (
                 <span style={{ display: "flex", flexDirection: "column", alignItems: "center", fontSize: fs - 3, color: "#9a9da8", minWidth: 28 }}>
                     {heart}
-                    {fmt(count)}
+                    <span style={{ position: "relative", display: "inline-block", minWidth: 24, textAlign: "center" }}>
+                        <AnimatePresence mode="popLayout" initial={false}>
+                            <motion.span key={count} initial={reduce ? false : { y: 10, opacity: 0, scale: 1.5 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ duration: 0.45 }} style={{ display: "inline-block", color: bump ? BLUE_GLOW : undefined, fontWeight: bump ? 700 : undefined }}>
+                                {fmt(count)}
+                            </motion.span>
+                        </AnimatePresence>
+                        <AnimatePresence>
+                            {bump && !reduce && (
+                                <motion.span key="plus" initial={{ opacity: 0, y: 0 }} animate={{ opacity: [0, 1, 1, 0], y: -26 }} transition={{ duration: 1.6, times: [0, 0.15, 0.7, 1] }} style={{ position: "absolute", left: "50%", top: -6, x: "-50%", color: BLUE_GLOW, fontWeight: 800, fontSize: fs, pointerEvents: "none" }}>
+                                    +1
+                                </motion.span>
+                            )}
+                        </AnimatePresence>
+                    </span>
                 </span>
             )}
-        </div>
+        </motion.div>
     )
 }
 
@@ -2025,11 +2081,13 @@ function TeamArt(props: { comfort: string }) {
     )
 }
 
-function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLiked: boolean; pop?: boolean; size?: "s" | "m"; reduce: boolean }) {
-    const { profile, likedId, studentLiked, pop, size = "s", reduce } = props
+function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLiked: boolean; showHeart?: boolean; glowLiked?: boolean; focus?: "post" | "comment" | null; pop?: boolean; size?: "s" | "m"; reduce: boolean }) {
+    const { profile, likedId, studentLiked, showHeart = true, glowLiked, focus = null, pop, size = "s", reduce } = props
+    const postRing: CSSProperties = { borderRadius: 12, padding: 6, margin: -6, border: `1px solid ${focus === "post" ? "rgba(110,123,255,.7)" : "transparent"}`, boxShadow: focus === "post" ? "0 0 26px rgba(110,123,255,.35)" : "none", opacity: focus === "comment" ? 0.4 : 1, transition: "all .7s ease" }
     const ids: CommentId[] = ["c3", "c1", "c4", "c2"]
     return (
         <div>
+            <div style={postRing}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <span style={{ width: size === "s" ? 22 : 28, height: size === "s" ? 22 : 28, borderRadius: 99, background: BLUE, display: "grid", placeItems: "center" }}>
                     <Bitmap map={EYE} size={size === "s" ? 13 : 16} color="#fff" />
@@ -2042,9 +2100,12 @@ function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLike
             <p style={{ fontSize: size === "s" ? 12 : 14, fontWeight: 600, margin: "8px 0 8px" }}>
                 <span style={{ color: "#9a9da8" }}>@{profile.name}</span> {YOUR_CAPTION[profile.team]}
             </p>
-            {ids.map((cid) => (
-                <CommentRow key={cid} handle={YOUR_HANDLES[cid]} text={YOUR_COMMENTS[profile.team][cid]} count={YOUR_COUNTS[cid] + (cid === likedId && studentLiked ? 1 : 0)} liked={cid === likedId && studentLiked} pop={cid === likedId && pop} size={size} reduce={reduce} />
-            ))}
+            </div>
+            <div style={{ opacity: focus === "post" ? 0.35 : 1, transition: "opacity .7s ease" }}>
+                {ids.map((cid) => (
+                    <CommentRow key={cid} handle={YOUR_HANDLES[cid]} text={YOUR_COMMENTS[profile.team][cid]} count={YOUR_COUNTS[cid] + (cid === likedId && studentLiked ? 1 : 0)} liked={showHeart && cid === likedId && studentLiked} pop={showHeart && cid === likedId && pop} glow={(glowLiked || focus === "comment") && cid === likedId} dim={(glowLiked || focus === "comment") && cid !== likedId} bump={!showHeart && studentLiked && cid === likedId} size={size} reduce={reduce} />
+                ))}
+            </div>
         </div>
     )
 }
@@ -2054,14 +2115,15 @@ function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLike
 function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => void; reduce: boolean }) {
     const { initial, onDone, reduce } = props
     const [step, setStep] = useState(0)
-    const [name, setName] = useState(initial?.name || NAME_IDEAS[Math.floor(Math.random() * NAME_IDEAS.length)])
-    const [team, setTeam] = useState<TeamChoice | null>(initial?.team || null)
+    const [name, setName] = useState("")
+    const [idea] = useState(() => NAME_IDEAS[Math.floor(Math.random() * NAME_IDEAS.length)])
+    const [team, setTeam] = useState<TeamChoice | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     useEffect(() => {
         if (step === 0) window.setTimeout(() => inputRef.current?.focus(), 400)
     }, [step])
     const clean = (v: string) => v.toLowerCase().replace(/[^a-z0-9._]/g, "").slice(0, 18)
-    const finish = (comfort: string) => onDone({ name: clean(name) || "you", team: team || "reported", comfort })
+    const finish = (comfort: string) => onDone({ name: clean(name) || idea, team: team || "reported", comfort })
     const titles = ["Create your profile", "Group project. One teammate did nothing. You…", "Your comfort thing?"]
     return (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", padding: "22px 18px 18px", color: TEXT }}>
@@ -2095,10 +2157,10 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
                             <label style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 14px", borderRadius: 12, background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.14)", height: 52 }}>
                                 <span style={{ color: "#9a9da8", fontSize: 17 }}>@</span>
                                 <span style={srOnly}>Nickname</span>
-                                <input ref={inputRef} value={name} onChange={(e) => setName(clean(e.target.value))} maxLength={18} autoComplete="off" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: TEXT, fontSize: 17, fontFamily: "inherit" }} />
+                                <input ref={inputRef} value={name} placeholder={idea} onChange={(e) => setName(clean(e.target.value))} maxLength={18} autoComplete="off" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: TEXT, fontSize: 17, fontFamily: "inherit" }} />
                             </label>
                             <div style={{ flex: 1 }} />
-                            <button type="submit" className="btn" disabled={!clean(name)} style={{ width: "100%" }}>
+                            <button type="submit" className="btn" style={{ width: "100%" }}>
                                 Next
                             </button>
                         </form>
@@ -2141,11 +2203,11 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
 
 function YourPostPOV(props: { profile: Profile; likedId: CommentId; reduce: boolean; still?: boolean; onDone: () => void }) {
     const { profile, likedId, reduce, still, onDone } = props
-    const [step, setStep] = useState(still ? 2 : 0) // 0 scrolling · 1 stopped on your post · 2 like lands
+    const [step, setStep] = useState(still ? 4 : 0) // 0 scrolling · 1 stops on your post · 2 reads the post · 3 reads that comment · 4 like lands
     useEffect(() => {
         if (still) return
-        const seq = reduce ? [300, 900, 2600] : [2600, 4400, 7000]
-        const ts = seq.map((ms, i) => window.setTimeout(() => (i < 2 ? setStep(i + 1) : onDone()), ms))
+        const seq = reduce ? [300, 900, 1800, 2700, 4600] : [2600, 4300, 7300, 10300, 13800]
+        const ts = seq.map((ms, i) => window.setTimeout(() => (i < 4 ? setStep(i + 1) : onDone()), ms))
         return () => ts.forEach((t) => window.clearTimeout(t))
     }, [still, reduce])
     return (
@@ -2153,7 +2215,7 @@ function YourPostPOV(props: { profile: Profile; likedId: CommentId; reduce: bool
             <BlurredRoom beat={3} reduce={reduce} />
             <HandPhone still={still} reduce={reduce}>
                 <div style={{ height: "100%", overflow: "hidden", position: "relative" }}>
-                    <motion.div initial={still ? false : { y: 0 }} animate={{ y: step >= 1 ? -300 : 0 }} transition={{ duration: reduce ? 0.01 : 2.2, ease: [0.3, 0, 0.2, 1] }} style={{ padding: "14px 12px", color: TEXT }}>
+                    <motion.div initial={still ? false : { y: 0 }} animate={{ y: step >= 3 ? -400 : step >= 1 ? -300 : 0 }} transition={{ duration: reduce ? 0.01 : 2.2, ease: [0.3, 0, 0.2, 1] }} style={{ padding: "14px 12px", color: TEXT }}>
                         {/* someone else's post scrolls past first */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                             <span style={{ width: 22, height: 22, borderRadius: 99, background: "rgba(255,255,255,.2)" }} />
@@ -2163,7 +2225,7 @@ function YourPostPOV(props: { profile: Profile; likedId: CommentId; reduce: bool
                             <PostArt kind="read" />
                         </div>
                         <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 24px" }}>left everyone on read for 3 months</p>
-                        <YourPostCard profile={profile} likedId={likedId} studentLiked={step >= 2} pop={step >= 2} reduce={reduce} />
+                        <YourPostCard profile={profile} likedId={likedId} studentLiked={step >= 4} pop={step >= 4} reduce={reduce} />
                     </motion.div>
                 </div>
             </HandPhone>
@@ -2180,6 +2242,11 @@ function YourMove(props: { profile: Profile; likedId: CommentId; handle: string;
     const [compose, setCompose] = useState(false)
     const [draft, setDraft] = useState("")
     const [hintOn, setHintOn] = useState(false)
+    const [landed, setLanded] = useState(false)
+    useEffect(() => {
+        const t = window.setTimeout(() => setLanded(true), reduce ? 0 : 1100)
+        return () => window.clearTimeout(t)
+    }, [reduce])
     const taRef = useRef<HTMLTextAreaElement>(null)
     useEffect(() => {
         const t = window.setTimeout(() => setHintOn(true), reduce ? 0 : 3500)
@@ -2207,7 +2274,7 @@ function YourMove(props: { profile: Profile; likedId: CommentId; handle: string;
                     </span>
                 </header>
                 <div style={{ borderRadius: 16, background: "#171a22", padding: 12, marginBottom: 14, border: "1px solid rgba(255,255,255,.06)" }}>
-                    <YourPostCard profile={profile} likedId={likedId} studentLiked size="m" reduce={reduce} />
+                    <YourPostCard profile={profile} likedId={likedId} studentLiked={landed} showHeart={false} glowLiked={landed} size="m" reduce={reduce} />
                 </div>
                 <div style={{ borderRadius: 16, background: "#171a22", padding: 12, border: "1px solid rgba(255,255,255,.06)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -2279,19 +2346,34 @@ function YourMove(props: { profile: Profile; likedId: CommentId; handle: string;
 
 /* ───────────────────────── Ending: two windows, nothing more ───────────────────────── */
 
-function Ending(props: { step: number; onFeed: () => void; reduce: boolean }) {
-    const { step, onFeed } = props
+function Ending(props: { step: number; onReplay: () => void; handle: string; reduce: boolean }) {
+    const { step, onReplay, reduce } = props
+    const d = reduce ? 0.01 : 1
     return (
         <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
             <AnimatePresence>
-                {step >= 1 && (
-                    <motion.div key="close" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9 }} style={{ position: "absolute", left: 0, right: 0, bottom: "12%", textAlign: "center", padding: "0 20px" }}>
+                {step >= 1 && step < 3 && (
+                    <motion.div key="line" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6, transition: { duration: 0.9 * d } }} transition={{ duration: 0.9 * d }} style={{ position: "absolute", left: 0, right: 0, bottom: "14%", textAlign: "center", padding: "0 20px" }}>
                         <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
                             Everyone is more than the moment you saw.
                         </p>
-                        <button onClick={onFeed} className="btn" style={{ marginTop: 22, pointerEvents: "auto" }}>
-                            Back to the feed <Icon name="next" size={18} />
-                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            {/* outro: the building goes dark, then the title card */}
+            <motion.div initial={false} animate={{ opacity: step >= 2 ? 1 : 0 }} transition={{ duration: 1.4 * d }} style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 50% 55%, rgba(16,19,26,.55), #07080b 75%)" }} />
+            <AnimatePresence>
+                {step >= 3 && (
+                    <motion.div key="title" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.4 * d }} style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: "0 24px", textAlign: "center", color: TEXT }}>
+                        <motion.div initial={{ scale: reduce ? 1 : 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 1.2 * d }}>
+                            <Bitmap map={EYE} size={56} color={BLUE_GLOW} />
+                        </motion.div>
+                        <h2 className="px" style={{ margin: 0, fontSize: "clamp(40px, 7vw, 84px)", lineHeight: 0.9, textTransform: "uppercase", fontWeight: 400, letterSpacing: ".02em" }}>
+                            The Other Side
+                        </h2>
+                        <motion.button initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 * d, duration: 0.6 * d }} onClick={onReplay} className="ghost" style={{ marginTop: 14, pointerEvents: "auto", borderRadius: 999, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <Icon name="replay" size={18} /> Play again
+                        </motion.button>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -2303,7 +2385,7 @@ function Ending(props: { step: number; onFeed: () => void; reduce: boolean }) {
 
 function TopBar(props: { progress: number; onBack: () => void; onSkip?: () => void }) {
     const { progress, onBack, onSkip } = props
-    const names = ["Watch", "Live", "Watched", "Your side"]
+    const names = ["Watch", "Live", "Watched", "Watching you", "Your side"]
     const box: CSSProperties = { width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", color: TEXT, background: "rgba(12,12,16,.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,.12)", pointerEvents: "auto" }
     return (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", pointerEvents: "none" }}>
@@ -2338,7 +2420,7 @@ function TopBar(props: { progress: number; onBack: () => void; onSkip?: () => vo
 /* ───────────────────────── Feed (inside the phone) ───────────────────────── */
 
 function Feed(props: { handle: string; caption: string; storyLiked: boolean; onStoryLike: () => void; onComments: () => void; done: boolean; onReplay: () => void }) {
-    const { handle, caption, storyLiked, onStoryLike, onComments, done, onReplay } = props
+    const { handle, caption, storyLiked, onStoryLike, onComments, done } = props
     return (
         <div className="scroll" style={{ position: "absolute", inset: 0, background: NIGHT }}>
             <div style={{ padding: "16px 14px 40px" }}>
@@ -2352,18 +2434,6 @@ function Feed(props: { handle: string; caption: string; storyLiked: boolean; onS
                     <span style={{ fontSize: 13, fontWeight: 700, color: TEXT, borderBottom: `2px solid ${BLUE_GLOW}`, paddingBottom: 2 }}>For you</span>
                 </header>
 
-                <AnimatePresence>
-                    {done && (
-                        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ marginBottom: 14, borderRadius: 16, padding: 16, background: "#1a1d26", border: "1px solid rgba(255,255,255,.08)", display: "flex", alignItems: "center", gap: 12 }}>
-                            <p className="serif" style={{ margin: 0, fontSize: 22, lineHeight: 1.1, fontStyle: "italic", flex: 1 }}>
-                                Everyone is more than the moment you saw.
-                            </p>
-                            <button onClick={onReplay} aria-label="Play again" className="ghost" style={{ width: 46, padding: 0, flexShrink: 0, borderRadius: 999 }}>
-                                <Icon name="replay" size={20} />
-                            </button>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
 
                 <StoryCard art="dropout" handle={handle} caption={caption} likes={2100000 + (storyLiked ? 1 : 0)} comments={18400} liked={storyLiked} onLike={onStoryLike} onComments={onComments} badge={done ? "Seen the other side" : undefined} />
                 <StoryCard art="read" handle="exhibit_002" caption="left everyone on read for 3 months" likes={984000} comments={7200} locked />
@@ -2500,63 +2570,163 @@ function Drawer(props: { open: boolean; onClose: () => void; liked: string | nul
 
 /* ───────────────────────── Room ───────────────────────── */
 
-function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hint: ObjId | null; onOpen: (id: ObjId) => void; reduce: boolean; flash: string | null; pops: boolean; unlocked: ObjId[] }) {
-    const { beat, visited, target, hint, onOpen, reduce, flash, pops, unlocked } = props
+function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hint: ObjId | null; onOpen: (id: ObjId) => void; reduce: boolean; flash: string | null; pops: boolean; unlocked: ObjId[]; picks: Option[]; blocked: boolean }) {
+    const { beat, visited, target, hint, onOpen, reduce, pops, unlocked, picks, blocked } = props
     const wrapRef = useRef<HTMLDivElement>(null)
     const box = useBox(wrapRef)
-    const [pan, setPan] = useState(0)
-    const [par, setPar] = useState({ x: 0, y: 0 })
-    const drag = useRef<{ x: number; p: number; moved: boolean } | null>(null)
+    const [player, setPlayer] = useState({ x: 800, y: 800, heading: 0 })
+    const playerRef = useRef(player)
+    const [camera, setCamera] = useState({ x: 0, y: 0 })
+    const cameraRef = useRef(camera)
+    const [paused, setPaused] = useState(false)
+    const [locked, setLocked] = useState(false)
+    const held = useRef(new Set<string>())
+    const drag = useRef<{ x: number; y: number; cameraX: number; cameraY: number } | null>(null)
+    const active = !blocked && !paused
 
     const scale = Math.max(box.w / 1600, box.h / 900)
     const sw = 1600 * scale
     const sh = 900 * scale
-    const maxPan = Math.max(0, (sw - box.w) / 2)
+    const zoom = 1.12
+    const maxX = Math.max(0, (sw * zoom - box.w) / 2)
+    const maxY = Math.max(0, (sh * zoom - box.h) / 2)
 
-    const focus = hint || target
-    useEffect(() => {
-        if (!focus || maxPan <= 0) return
-        const objX = (OBJECTS[focus].x / 100) * sw - sw / 2
-        setPan(clamp(-objX, -maxPan, maxPan))
-    }, [focus, maxPan, sw])
-
-    const onMove = (e: RPointerEvent) => {
-        if (drag.current) {
-            const dx = e.clientX - drag.current.x
-            if (Math.abs(dx) > 5) drag.current.moved = true
-            setPan(clamp(drag.current.p + dx, -maxPan, maxPan))
-            return
-        }
-        if (reduce || e.pointerType !== "mouse") return
-        const r = wrapRef.current?.getBoundingClientRect()
-        if (!r) return
-        setPar({ x: ((e.clientX - r.left) / r.width - 0.5) * -22, y: ((e.clientY - r.top) / r.height - 0.5) * -12 })
+    const collides = (x: number, y: number) => {
+        if (x < 42 || x > 1558 || y < 640 || y > 872) return true
+        const radius = 28
+        const obstacles = [
+            [0, 0, 590, 740],      // bed
+            [0, 625, 430, 900],    // foreground chair
+            [675, 585, 795, 742],  // backpack
+            [780, 525, 1420, 746], // desk and drawers
+        ]
+        return obstacles.some(([l, t, r, b]) => x + radius > l && x - radius < r && y + radius > t && y - radius < b)
     }
 
+    const nearest = () => {
+        const p = playerRef.current
+        return (Object.keys(OBJECTS) as ObjId[])
+            .filter(id => unlocked.includes(id) || visited.includes(id))
+            .map(id => ({ id, d: Math.hypot(p.x - OBJECTS[id].x / 100 * 1600, p.y - OBJECTS[id].y / 100 * 900) }))
+            .sort((a, b) => a.d - b.d)[0]
+    }
+    const interactNearby = () => {
+        const n = nearest()
+        if (n && n.d < 490) onOpen(n.id)
+    }
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.code.startsWith("Arrow")) e.preventDefault()
+            if (e.code === "Escape") {
+                if (blocked) return
+                held.current.clear()
+                if (document.pointerLockElement) document.exitPointerLock?.()
+                setPaused(true)
+                return
+            }
+            if (e.code === "KeyE") {
+                if (!blocked && !paused) { e.preventDefault(); interactNearby() }
+                return
+            }
+            if (e.code.startsWith("Arrow") && !blocked && !paused) held.current.add(e.code)
+        }
+        const onKeyUp = (e: KeyboardEvent) => { if (e.code.startsWith("Arrow")) { e.preventDefault(); held.current.delete(e.code) } }
+        const onBlur = () => held.current.clear()
+        const onLock = () => setLocked(document.pointerLockElement === wrapRef.current)
+        window.addEventListener("keydown", onKeyDown)
+        window.addEventListener("keyup", onKeyUp)
+        window.addEventListener("blur", onBlur)
+        document.addEventListener("pointerlockchange", onLock)
+        return () => {
+            window.removeEventListener("keydown", onKeyDown)
+            window.removeEventListener("keyup", onKeyUp)
+            window.removeEventListener("blur", onBlur)
+            document.removeEventListener("pointerlockchange", onLock)
+            held.current.clear()
+        }
+    }, [blocked, paused])
+
+    useEffect(() => {
+        if (!active) { held.current.clear(); return }
+        let frame = 0
+        let last = 0
+        const tick = (time: number) => {
+            const dt = last ? Math.min((time - last) / 1000, .04) : 0
+            last = time
+            const keys = held.current
+            let forward = (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0)
+            let strafe = (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0)
+            const len = Math.hypot(forward, strafe) || 1
+            forward /= len; strafe /= len
+            if (forward || strafe) {
+                const p = playerRef.current
+                const speed = 235 * dt
+                const dx = (Math.sin(p.heading) * forward + Math.cos(p.heading) * strafe) * speed
+                const dy = (-Math.cos(p.heading) * forward + Math.sin(p.heading) * strafe) * speed
+                let nx = p.x, ny = p.y
+                if (!collides(p.x + dx, p.y)) nx += dx
+                if (!collides(nx, p.y + dy)) ny += dy
+                if (nx !== p.x || ny !== p.y) {
+                    const next = { ...p, x: nx, y: ny }
+                    playerRef.current = next
+                    setPlayer(next)
+                    const c = cameraRef.current
+                    const nextCamera = { x: clamp(c.x - (nx - p.x) * scale * .78, -maxX, maxX), y: clamp(c.y - (ny - p.y) * scale * .55, -maxY, maxY) }
+                    cameraRef.current = nextCamera
+                    setCamera(nextCamera)
+                }
+            }
+            frame = requestAnimationFrame(tick)
+        }
+        frame = requestAnimationFrame(tick)
+        return () => cancelAnimationFrame(frame)
+    }, [active, scale, maxX, maxY])
+
+    useEffect(() => {
+        if (!locked || !active) return
+        const onMouse = (e: MouseEvent) => {
+            const p = playerRef.current
+            const next = { ...p, heading: p.heading + e.movementX * .0028 }
+            playerRef.current = next
+            setPlayer(next)
+            const c = cameraRef.current
+            const nextCamera = { x: clamp(c.x - e.movementX * .58, -maxX, maxX), y: clamp(c.y - e.movementY * .5, -maxY, maxY) }
+            cameraRef.current = nextCamera
+            setCamera(nextCamera)
+        }
+        document.addEventListener("mousemove", onMouse)
+        return () => document.removeEventListener("mousemove", onMouse)
+    }, [locked, active, maxX, maxY])
+
+    const onSceneClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        const targetEl = e.target as HTMLElement
+        if (targetEl.closest("button") || blocked || paused) return
+        if (document.pointerLockElement) { interactNearby(); return }
+        if (!document.pointerLockElement) {
+            try { wrapRef.current?.requestPointerLock?.() } catch {}
+        }
+    }
+    const onMove = (e: RPointerEvent) => {
+        if (!drag.current || e.pointerType === "mouse") return
+        const dx = e.clientX - drag.current.x
+        const dy = e.clientY - drag.current.y
+        const c = { x: clamp(drag.current.cameraX + dx, -maxX, maxX), y: clamp(drag.current.cameraY + dy, -maxY, maxY) }
+        cameraRef.current = c
+        setCamera(c)
+    }
+
+    const nearby = (Object.keys(OBJECTS) as ObjId[]).filter(id => Math.hypot(player.x - OBJECTS[id].x / 100 * 1600, player.y - OBJECTS[id].y / 100 * 900) < 490)
     const dust = useMemo(() => Array.from({ length: 16 }).map((_, i) => ({ l: 20 + hash(i, 1, 7) * 70, t: 30 + hash(i, 2, 7) * 60, d: hash(i, 3, 7) * 9 })), [])
 
     return (
-        <div
-            ref={wrapRef}
-            onPointerMove={onMove}
-            onPointerDown={(e) => {
-                if (maxPan > 0 && e.pointerType !== "mouse") drag.current = { x: e.clientX, p: pan, moved: false }
-            }}
-            onPointerUp={() => (drag.current = null)}
-            onPointerCancel={() => (drag.current = null)}
-            style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f", touchAction: maxPan > 0 ? "pan-y" : "auto" }}
-        >
-            <motion.div animate={{ x: pan + par.x, y: par.y }} transition={{ type: "tween", ease: "easeOut", duration: 0.5 }} style={{ position: "absolute", left: (box.w - sw) / 2, top: (box.h - sh) / 2, width: sw, height: sh }}>
-                <RoomSVG beat={beat} buzz={target === "phone"} />
-                {beat >= 2 && (
-                    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                        {CROWD.slice(0, 3).map((c, i) => (
-                            <span key={c.t} className="px" style={{ position: "absolute", left: `${[13, 24, 8][i]}%`, top: `${[17, 30, 40][i]}%`, color: BLUE_GLOW, opacity: 0.75, fontSize: 18, textShadow: `0 0 10px ${BLUE}` }}>
-                                {c.t}
-                            </span>
-                        ))}
-                    </div>
-                )}
+        <div ref={wrapRef} onClick={onSceneClick} onPointerMove={onMove}
+            onPointerDown={e => { if (e.pointerType !== "mouse") drag.current = { x:e.clientX, y:e.clientY, cameraX:camera.x, cameraY:camera.y } }}
+            onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
+            style={{ position:"absolute", inset:0, overflow:"hidden", background:"#120d0f", touchAction:"none", cursor:locked ? "none" : "crosshair" }}>
+            <motion.div animate={{ x:camera.x, y:camera.y, scale:zoom }} transition={{ type:"tween", ease:"linear", duration:.12 }}
+                style={{ position:"absolute", left:(box.w-sw)/2, top:(box.h-sh)/2, width:sw, height:sh, transformOrigin:"center center" }}>
+                <RoomSVG beat={beat} buzz={nearby.includes("phone")} />
                 {/* the phone won't stop: Mom, strangers, then the boss */}
                 {pops && (
                     <div aria-live="polite" style={{ position: "absolute", left: `${OBJECTS.phone.x}%`, top: `${OBJECTS.phone.y - 6}%`, width: 0, height: 0, zIndex: 4, pointerEvents: "none" }}>
@@ -2582,197 +2752,46 @@ function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hin
                         })}
                     </div>
                 )}
-                {/* how it looks from outside: a stranger's take flashes on the glass */}
-                <AnimatePresence>
-                    {flash && (
-                        <motion.div
-                            key={flash}
-                            role="status"
-                            initial={{ opacity: 0, scale: reduce ? 1 : 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ delay: reduce ? 0 : 0.5, duration: 0.4 }}
-                            style={{ position: "absolute", left: "9.5%", top: "20%", width: "22%", zIndex: 2, pointerEvents: "none", padding: "8px 12px", borderRadius: 12, background: "rgba(14,16,26,.82)", border: `1px solid ${BLUE_GLOW}`, boxShadow: `0 0 26px rgba(51,70,255,.55)`, color: "#fff" }}
-                        >
-                            <div style={{ fontSize: 11, color: "#a9aec8", fontWeight: 700 }}>@stranger · just now</div>
-                            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>{flash}</div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-                <AnimatePresence>
-                    {(Object.keys(OBJECTS) as ObjId[])
-                        .filter((id) => unlocked.includes(id) || visited.includes(id))
-                        .map((id) => {
-                            const o = OBJECTS[id]
-                            const isTarget = target === id || hint === id
-                            const seen = visited.includes(id) && !isTarget
-                            return (
-                                <motion.button
-                                    key={id}
-                                    initial={reduce ? false : { opacity: 0, scale: 0.4 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ type: "spring", stiffness: 300, damping: 18 }}
-                                    className={`hot${isTarget ? " target" : ""}${seen ? " seen" : ""}`}
-                                    onClick={() => !drag.current?.moved && onOpen(id)}
-                                    aria-label={o.label}
-                                    style={{ left: `${o.x}%`, top: `${o.y}%`, zIndex: 3, x: "-50%", y: "-50%" }}
-                                >
-                                    <span className="ring" />
-                                    <span className="dot" />
-                                    <span className="lbl">{o.label}</span>
-                                </motion.button>
-                            )
-                        })}
-                </AnimatePresence>
+                {(Object.keys(OBJECTS) as ObjId[]).filter(id => unlocked.includes(id) || visited.includes(id)).map(id => {
+                    const o = OBJECTS[id]
+                    const focused = target === id || hint === id
+                    return <button key={id} className={`hot${focused ? " target" : ""}${nearby.includes(id) ? " nearby" : ""}`} aria-label={`Inspect ${o.label}`} onClick={e => { e.stopPropagation(); if (!drag.current) onOpen(id) }}
+                        style={{ left:o.x+"%", top:o.y+"%", transform:"translate(-50%,-50%)", zIndex:3 }}>
+                        <span className="ring" /><span className="dot" /><span className="lbl">{o.label}{nearby.includes(id) ? " · E" : ""}</span>
+                    </button>
+                })}
             </motion.div>
-            {!reduce &&
-                dust.map((d, i) => <span key={i} className="dust" aria-hidden="true" style={{ left: `${d.l}%`, top: `${d.t}%`, animationDelay: `${d.d}s` }} />)}
-            <div className="vignette" />
-            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-                <div className="grain" />
+            <div className="vignette" /><div className="grain" />
+            <ScreenAudience picks={picks} reduce={reduce} />
+            <div className="px" style={{position:"absolute",left:14,bottom:12,zIndex:6,padding:"4px 10px",borderRadius:8,background:"rgba(12,10,12,.5)",color:"rgba(243,237,228,.75)",fontSize:18,pointerEvents:"none"}}>
+                ↑↓ MOVE · ←→ STRAFE · E INSPECT · CLICK TO LOOK · ESC PAUSE
             </div>
+            {paused && <div role="dialog" aria-label="Experience paused" style={{position:"absolute",inset:0,zIndex:15,display:"grid",placeItems:"center",background:"rgba(8,9,14,.5)",backdropFilter:"blur(4px)"}}>
+                <div style={{textAlign:"center",padding:24,background:"rgba(16,19,26,.94)",border:"1px solid rgba(255,255,255,.18)",borderRadius:16,color:TEXT}}>
+                    <div className="px" style={{fontSize:28,marginBottom:12}}>PAUSED</div>
+                    <button className="btn" onClick={() => setPaused(false)}>Resume exploring</button>
+                    <div style={{fontSize:12,opacity:.65,marginTop:12}}>Arrow keys move · E inspects</div>
+                </div>
+            </div>}
         </div>
     )
 }
 
-/* ───────────────────────── Watched overlay ───────────────────────── */
-
-function WatchedOverlay(props: { step: number; picks: Option[]; liked: Comment | null; watchers: number; reduce: boolean; onNext: () => void }) {
-    const { step, picks, liked, watchers, reduce, onNext } = props
-    const crowd = useMemo(() => (liked ? [{ h: liked.handle, t: liked.text }, ...CROWD] : CROWD), [liked])
-    const winPos: CSSProperties[] = [
-        { left: "4%", top: "16%" },
-        { right: "4%", top: "24%" },
-        { left: "6%", bottom: "20%" },
-    ]
-    const cmtPos: CSSProperties[] = [
-        { right: "6%", bottom: "22%" },
-        { left: "36%", top: "13%" },
-        { right: "30%", bottom: "12%" },
-        { left: "3%", top: "46%" },
-        { right: "3%", top: "52%" },
-        { left: "30%", bottom: "8%" },
-        { left: "54%", top: "18%" },
-    ]
-    const crowdOn = step >= 2 && step < 4
-    return (
-        <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: step >= 1 && step < 4 ? 1 : 0 }} className="px" style={{ position: "absolute", top: 74, left: "50%", x: "-50%", display: "flex", gap: 10, alignItems: "center", fontSize: 24, whiteSpace: "nowrap", color: "#fff", background: "rgba(10,12,18,.6)", padding: "2px 14px", borderRadius: 8 }}>
-                <span className="blink" style={{ width: 10, height: 10, borderRadius: 99, background: BLUE_GLOW, boxShadow: `0 0 10px ${BLUE}` }} />
-                LIVE · {(1204331 + watchers * 18240).toLocaleString("en-US")} WATCHING
-            </motion.div>
-
-            <AnimatePresence>
-                {crowdOn &&
-                    picks.map((p, i) => (
-                        <motion.div key={p.id} initial={{ opacity: 0, scale: reduce ? 1 : 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, transition: { duration: 0.5 } }} transition={{ delay: reduce ? 0 : i * 0.3, type: "spring", stiffness: 380, damping: 22 }} style={{ position: "absolute", ...winPos[i], width: "min(330px, 62vw)", zIndex: 4 }}>
-                            <Win title="⚠ Breaking" alert>
-                                <p className="px" style={{ margin: 0, fontSize: 28, lineHeight: 0.95, textTransform: "uppercase" }}>
-                                    {p.head}
-                                </p>
-                            </Win>
-                        </motion.div>
-                    ))}
-                {crowdOn &&
-                    step >= 3 &&
-                    crowd.slice(0, 7).map((c, i) => (
-                        <motion.div
-                            key={"c" + c.h + i}
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, transition: { duration: 0.5 } }}
-                            transition={{ delay: reduce ? 0 : i * 0.1 }}
-                            style={{ position: "absolute", ...cmtPos[i], background: "rgba(16,18,24,.85)", color: "#fff", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, padding: "7px 12px", maxWidth: 280, zIndex: 5, boxShadow: "0 8px 20px rgba(0,0,0,.4)" }}
-                        >
-                            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>@{c.h}</div>
-                            <div style={{ fontSize: 15, fontWeight: 600 }}>{c.t}</div>
-                        </motion.div>
-                    ))}
-            </AnimatePresence>
-
-            {step >= 5 && (
-                <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onClick={onNext} aria-label="Continue" className="btn" style={{ position: "absolute", left: "50%", x: "-50%", bottom: 28, zIndex: 12, pointerEvents: "auto", width: 56, padding: 0, borderRadius: 99 }}>
-                    <Icon name="next" size={20} />
-                </motion.button>
-            )}
-        </div>
-    )
+function WatchedOverlay({step,picks,liked,watchers,reduce,onNext}: {step:number; picks:Option[]; liked:Comment|null; watchers:number; reduce:boolean; onNext:()=>void}) {
+    return <div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
+        <ScreenAudience picks={picks} reduce={reduce} />
+        <div className="px" style={{position:"absolute",top:80,left:"50%",transform:"translateX(-50%)",fontSize:24,background:NIGHT,padding:"6px 14px",whiteSpace:"nowrap"}}>LIVE · {fmt(1204331 + watchers * 18240)} WATCHING</div>
+        {step >= 5 && <button className="btn" onClick={onNext} style={{position:"absolute",bottom:28,left:"50%",transform:"translateX(-50%)",pointerEvents:"auto",zIndex:12}}>Continue <Icon name="next" size={18}/></button>}
+    </div>
 }
 
-
-
-/* ───────────────────────── HUD ───────────────────────── */
-
-function Bar(props: { v: number }) {
-    return (
-        <span aria-hidden="true" style={{ width: 60, height: 6, borderRadius: 99, background: "rgba(255,255,255,.15)", overflow: "hidden", display: "inline-block" }}>
-            <motion.span animate={{ width: `${props.v}%` }} style={{ display: "block", height: "100%", background: TEXT, borderRadius: 99 }} />
-        </span>
-    )
+function Bar({v}: {v:number}) {
+ return <span style={{width:60,height:6,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden",display:"inline-block"}}><span style={{display:"block",height:"100%",width:v+"%",background:TEXT}} /></span>
 }
-
-function Hud(props: { stats: Stats; clock: string; reduce: boolean }) {
-    const { stats, clock, reduce } = props
-    const prev = useRef(stats)
-    const [delta, setDelta] = useState<{ d: Stats; k: number } | null>(null)
-    useEffect(() => {
-        const p = prev.current
-        prev.current = stats
-        const d = { money: stats.money - p.money, energy: stats.energy - p.energy, grade: stats.grade - p.grade }
-        if (!d.money && !d.energy && !d.grade) return
-        setDelta({ d, k: Date.now() })
-        const t = window.setTimeout(() => setDelta(null), 3000)
-        return () => window.clearTimeout(t)
-    }, [stats])
-
-    const chip: CSSProperties = { position: "relative", display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(14,11,13,.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,235,210,.12)", borderRadius: 10, padding: "0 12px", fontSize: 21, color: TEXT, height: 36, transition: "border-color .3s, box-shadow .3s, background .3s" }
-    const UP = "#9DF0B8"
-    const DOWN = "#FF7A66"
-    const hl = (v: number): CSSProperties =>
-        v ? { borderColor: v > 0 ? UP : DOWN, boxShadow: `0 0 0 1px ${v > 0 ? UP : DOWN}, 0 0 24px ${v > 0 ? "rgba(157,240,184,.45)" : "rgba(255,122,102,.55)"}`, background: v > 0 ? "rgba(30,60,40,.7)" : "rgba(70,20,16,.72)" } : {}
-    const stat = (p: { k: keyof Stats; children: ReactNode; title: string }) => {
-        const v = delta ? delta.d[p.k] : 0
-        return (
-            <motion.span key={`${p.k}-${v ? delta?.k : 0}`} animate={v && !reduce ? { scale: [1, 1.16, 1] } : { scale: 1 }} transition={{ duration: 0.5 }} style={{ ...chip, ...hl(v) }} title={p.title}>
-                {p.children}
-                <AnimatePresence>
-                    {v ? (
-                        <motion.span
-                            key={delta?.k}
-                            initial={{ opacity: 0, y: 0 }}
-                            animate={{ opacity: [0, 1, 1, 0], y: [4, 26, 30, 36] }}
-                            transition={{ duration: reduce ? 0.01 : 2.8, times: [0, 0.12, 0.8, 1] }}
-                            style={{ position: "absolute", left: "50%", top: "100%", x: "-50%", fontSize: 26, color: v > 0 ? UP : DOWN, textShadow: "0 2px 12px rgba(0,0,0,.9)", whiteSpace: "nowrap", pointerEvents: "none" }}
-                        >
-                            {v > 0 ? "+" : "−"}
-                            {p.k === "money" ? "$" : ""}
-                            {Math.abs(v)}
-                        </motion.span>
-                    ) : null}
-                </AnimatePresence>
-            </motion.span>
-        )
-    }
-    return (
-        <div role="status" aria-label={`${clock}. Money $${stats.money} of $640 rent. Energy ${stats.energy}. Grades ${stats.grade}.`} className="px" style={{ position: "absolute", top: 70, left: 16, zIndex: 5, display: "flex", flexWrap: "wrap", gap: 8, maxWidth: "calc(100% - 32px)" }}>
-            <span style={chip}>{clock}</span>
-            {stat({ k: "money", title: "Money for rent", children: (<>
-                <span style={{ opacity: 0.6 }}>RENT</span>
-                <span style={{ color: stats.money < 640 ? AMBER : TEXT }}>${stats.money}</span>
-                <span style={{ opacity: 0.5 }}>/640</span>
-            </>) })}
-            <span style={chip}>
-                <span style={{ opacity: 0.6 }}>EXAM</span> FRI 9AM
-            </span>
-            {stat({ k: "energy", title: "Energy", children: (<>
-                <span style={{ opacity: 0.6 }}>ENERGY</span> <Bar v={stats.energy} />
-            </>) })}
-            {stat({ k: "grade", title: "Grades", children: (<>
-                <span style={{ opacity: 0.6 }}>GRADES</span> <Bar v={stats.grade} />
-            </>) })}
-        </div>
-    )
+function Hud({stats,clock}: {stats:Stats;clock:string;reduce:boolean}) {
+ const chip:CSSProperties={display:"inline-flex",alignItems:"center",gap:8,background:"rgba(14,11,13,.8)",border:"1px solid rgba(255,235,210,.12)",borderRadius:10,padding:"0 12px",fontSize:21,height:36};
+ return <div role="status" className="px" style={{position:"absolute",top:70,left:16,zIndex:5,display:"flex",flexWrap:"wrap",gap:8,maxWidth:"calc(100% - 32px)"}}>
+ <span style={chip}>{clock}</span><span style={chip}>RENT <span style={{color:stats.money<640?AMBER:TEXT}}>${stats.money}</span>/640</span><span style={chip}>EXAM FRI 9AM</span><span style={chip}>ENERGY <Bar v={stats.energy}/></span><span style={chip}>GRADES <Bar v={stats.grade}/></span></div>
 }
 
 /* ───────────────────────── Object card ───────────────────────── */
@@ -2827,11 +2846,6 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
                         <span id="tos-card-title" className="px" style={{ fontSize: 19, letterSpacing: ".1em", opacity: 0.7, textTransform: "uppercase" }}>
                             {OBJECTS[open].label}
                         </span>
-                        {!isBeat && !outcome && (
-                            <button ref={firstRef} onClick={onClose} aria-label="Close" style={{ width: 36, height: 36, display: "grid", placeItems: "center", borderRadius: 99, background: "rgba(255,255,255,.08)" }}>
-                                <Icon name="x" size={16} />
-                            </button>
-                        )}
                     </div>
                     {outcome ? (
                         <div>
@@ -2855,7 +2869,12 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
                             </div>
                         </div>
                     ) : (
-                        <p style={{ margin: 0, fontSize: 21, fontWeight: 600, lineHeight: 1.35 }}>{OBJECTS[open].info}</p>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12 }}>
+                            <p style={{ margin: 0, fontSize: 21, fontWeight: 600, lineHeight: 1.35 }}>{OBJECTS[open].info}</p>
+                            <button ref={firstRef} onClick={onClose} aria-label="Continue" className="btn" style={{ width: 48, padding: 0, borderRadius: 99, flexShrink: 0 }}>
+                                <Icon name="next" size={18} />
+                            </button>
+                        </div>
                     )}
                 </motion.div>
             )}
@@ -2872,3 +2891,59 @@ addPropertyControls(TheOtherSide, {
     caption: { type: ControlType.String, title: "Caption", defaultValue: "dropped out at 20 lol 💀 #college" },
     startAt: { type: ControlType.Enum, title: "Start at", options: ["intro", "profile", "feed", "pov", "room", "yourpost", "yourmove"], optionTitles: ["Intro", "Profile", "Feed", "Phone POV", "Room", "Your post", "Your move"], defaultValue: "intro", description: "Preview only. Keep on Intro for the live site." },
 })
+/* Audience surrounds the viewport, independently of the room camera. */
+function ScreenAudience({ picks, reduce }: { picks: Option[]; reduce: boolean }) {
+    const ref = useRef<HTMLDivElement>(null)
+    const box = useBox(ref)
+    const narrow = box.w < 700
+    const count = picks.length * (narrow ? 8 : 16)
+    const perEdge = Math.max(1, Math.ceil(count / 4))
+    const figureHeight = (narrow ? 62 : 86) * (perEdge <= 4 ? 1 : perEdge <= 8 ? .78 : .62)
+    const figureWidth = figureHeight * .58
+    const positions: CSSProperties[] = narrow
+        ? [{ left: 8, top: "23%" }, { right: 8, top: "43%" }, { left: 8, bottom: 86 }]
+        : [{ left: 58, top: "22%" }, { right: 58, top: "40%" }, { right: 58, bottom: 88 }]
+    const poses = [
+        <><path d="M15 24Q22 19 29 24L32 48H12Z"/><path d="M15 28L7 43M29 28L37 19L40 10M17 47L13 84M27 47L32 84"/></>,
+        <><path d="M15 24Q22 19 29 24L32 48H12Z"/><path d="M15 28L6 13L11 6M29 28L38 13L33 6M17 47L10 84M27 47L34 84"/></>,
+        <><path d="M14 25Q22 18 30 25L33 49H11Z"/><path d="M14 29L4 36L10 44M30 29L39 39L43 35M17 48L14 84M27 48L31 84"/></>,
+        <><path d="M13 24Q22 19 31 24L36 50L8 50Z"/><path d="M14 29L5 41M30 29L39 41M16 49L12 84M28 49L32 84"/></>,
+        <><path d="M15 24Q22 19 29 24L32 48H12Z"/><path d="M15 28L7 36L14 40M29 28L37 36L30 40M17 47L13 84M27 47L32 84"/></>,
+        <><path d="M15 25Q22 19 29 25L32 47H12Z"/><path d="M15 29L7 18L11 12M29 29L37 37L42 32M17 47L10 78M27 47L37 77"/></>,
+    ]
+    return (
+        <div ref={ref} aria-label={count + " people watching"} style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 7, overflow: "hidden" }}>
+            {Array.from({ length: count }, (_, i) => {
+                const edge = i % 4
+                const slot = Math.floor(i / 4)
+                const pct = 5 + slot / Math.max(1, perEdge - 1) * 90
+                const side = edge === 1 || edge === 3
+                const angle = edge === 0 ? "180deg" : edge === 1 ? "-90deg" : edge === 3 ? "90deg" : "0deg"
+                const inward = edge === 0
+                    ? { left: pct + "%", top: -figureHeight * .25 }
+                    : edge === 1
+                      ? { right: -figureHeight * .25, top: (17 + slot / perEdge * 66) + "%" }
+                      : edge === 2
+                        ? { left: pct + "%", bottom: -figureHeight * .22 }
+                        : { left: -figureHeight * .25, top: (17 + slot / perEdge * 66) + "%" }
+                return <motion.div key={i} initial={{ opacity: 0, scale: .82 }} animate={{ opacity: .96, scale: 1 }} transition={{ delay: reduce ? 0 : (i % 16) * .07, type: "spring", stiffness: 300, damping: 22 }}
+                    style={{ position: "absolute", ...inward, width: side ? figureHeight : figureWidth, height: side ? figureWidth : figureHeight, transformOrigin: "center", filter: "drop-shadow(0 0 7px rgba(110,123,255,.28)) drop-shadow(0 2px 3px rgba(0,0,0,.8))" }}>
+                    <svg viewBox="0 0 44 90" aria-hidden="true" style={{ position:"absolute", left:"50%", top:"50%", width:figureWidth, height:figureHeight, transform:"translate(-50%,-50%) rotate(" + angle + ")", transformOrigin:"center", overflow:"visible" }}>
+                        <g fill="#08090d" stroke="#0a0b10" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="22" cy="13" r="8" stroke="rgba(110,123,255,.5)" strokeWidth="1.2"/>
+                            {poses[i % poses.length]}
+                        </g>
+                    </svg>
+                </motion.div>
+            })}
+            <AnimatePresence>
+                {picks.map((p, i) => <motion.div key={p.id} initial={{ opacity: 0, scale: reduce ? 1 : .85 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: .35 }} style={{ position: "absolute", ...positions[i], width: narrow ? "min(190px, 48%)" : "min(250px, 24%)", background: NIGHT, border: "1px solid " + BLUE_GLOW, boxShadow: "4px 4px 0 rgba(0,0,0,.6), 0 0 24px rgba(51,70,255,.25)", color: TEXT }}>
+                    <div className="px" style={{ background: BLUE, padding: "3px 10px", fontSize: narrow ? 14 : 18 }}>@{CROWD[i].h} · just now</div>
+                    <div style={{ padding: narrow ? "8px 10px" : "12px 14px", fontSize: narrow ? 12 : 15, lineHeight: 1.3, fontWeight: 600 }}>{p.outside}</div>
+                </motion.div>)}
+            </AnimatePresence>
+        </div>
+    )
+}
+
+
