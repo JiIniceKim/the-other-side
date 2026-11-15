@@ -1409,35 +1409,61 @@ export default function TheOtherSide(props: Props) {
 const EYE_W = 92
 const EYE_H = 58
 
+/* irregular loading: stalls, bursts, a long last stretch */
+const LOAD_CURVE: [number, number][] = [
+    [0, 0],
+    [500, 7],
+    [1100, 12],
+    [1400, 31],
+    [2300, 34],
+    [2700, 58],
+    [3500, 61],
+    [3800, 79],
+    [4500, 83],
+    [4900, 96],
+    [5300, 100],
+]
+function curveAt(t: number) {
+    for (let i = 1; i < LOAD_CURVE.length; i++) {
+        const [t1, p1] = LOAD_CURVE[i]
+        const [t0, p0] = LOAD_CURVE[i - 1]
+        if (t <= t1) {
+            const k = (t - t0) / (t1 - t0)
+            const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2
+            return Math.round(p0 + (p1 - p0) * e)
+        }
+    }
+    return 100
+}
+
 function Loader(props: { onDone: () => void; reduce: boolean }) {
     const { onDone, reduce } = props
     const ref = useRef<HTMLDivElement>(null)
     const box = useBox(ref)
     const [pct, setPct] = useState(0)
-    const [stare, setStare] = useState(false)
-    const FILL = reduce ? 500 : 2400
-    const HOLD = reduce ? 900 : 2400
+    // 0 loading · 1 eyes closing · 2 eyes open, staring at you
+    const [stage, setStage] = useState(0)
 
     const eyes = useMemo(() => {
         if (!box.ok) return []
         const cols = Math.ceil(box.w / EYE_W) + 1
         const rows = Math.ceil(box.h / EYE_H) + 1
-        const out: { k: number; x: number; y: number; open: number; bd: number; bp: number; s: number }[] = []
+        const out: { k: number; x: number; y: number; th: number; bd: number; bp: number; s: number }[] = []
         for (let r = 0; r < rows; r++)
             for (let c = 0; c < cols; c++) {
                 const k = r * cols + c
                 const x = c * EYE_W + (r % 2 ? EYE_W / 2 : 0) - EYE_W / 4
                 const y = r * EYE_H + EYE_H / 2 - 6
-                const diag = (x / box.w + y / box.h) / 2
-                out.push({ k, x, y, open: Math.max(0, diag) * (FILL / 1000) * 0.85 + hash(r, c, 21) * 0.15, bd: hash(r, c, 22) * 5, bp: 3 + hash(r, c, 23) * 4, s: 0.82 + hash(r, c, 24) * 0.3 })
+                const diag = clamp((x / box.w + y / box.h) / 2, 0, 1)
+                out.push({ k, x, y, th: Math.min(99, diag * 92 + hash(r, c, 21) * 8), bd: hash(r, c, 22) * 5, bp: 3 + hash(r, c, 23) * 4, s: 0.82 + hash(r, c, 24) * 0.3 })
             }
         return out
-    }, [box.ok, box.w, box.h, FILL])
+    }, [box.ok, box.w, box.h])
 
-    // each eye wanders on its own
+    // each eye wanders on its own while loading
     const [gaze, setGaze] = useState<Record<number, { x: number; y: number }>>({})
     useEffect(() => {
-        if (reduce || stare || eyes.length === 0) return
+        if (reduce || stage > 0 || eyes.length === 0) return
         const pick = () => {
             const ang = Math.random() * Math.PI * 2
             const m = 0.55 + Math.random() * 0.45
@@ -1448,38 +1474,47 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
             setGaze((g) => {
                 const n = { ...g }
                 eyes.forEach((e) => {
-                    if (Math.random() < 0.18) n[e.k] = pick()
+                    if (Math.random() < 0.15) n[e.k] = pick()
                 })
                 return n
             })
-        }, 420)
+        }, 520)
         return () => window.clearInterval(iv)
-    }, [eyes.length, stare, reduce])
+    }, [eyes.length, stage, reduce])
 
     useEffect(() => {
+        if (reduce) {
+            setPct(100)
+            setStage(2)
+            const t = window.setTimeout(onDone, 1200)
+            return () => window.clearTimeout(t)
+        }
         const t0 = Date.now()
-        let doneT = 0
+        const ts: number[] = []
         const iv = window.setInterval(() => {
-            const p = Math.min(100, Math.round(((Date.now() - t0) / FILL) * 100))
+            const p = curveAt(Date.now() - t0)
             setPct(p)
             if (p >= 100) {
                 window.clearInterval(iv)
-                setStare(true)
-                doneT = window.setTimeout(onDone, HOLD)
+                ts.push(window.setTimeout(() => setStage(1), 350)) // close, slowly
+                ts.push(window.setTimeout(() => setStage(2), 350 + 900 + 600)) // stay shut, then open on you
+                ts.push(window.setTimeout(onDone, 350 + 900 + 600 + 1300 + 2200)) // hold the stare
             }
         }, 40)
         return () => {
             window.clearInterval(iv)
-            window.clearTimeout(doneT)
+            ts.forEach((t) => window.clearTimeout(t))
         }
     }, [])
+
+    const staring = stage === 2
 
     return (
         <motion.div
             ref={ref}
             key="loader"
             initial={false}
-            exit={{ opacity: 0, transition: { duration: 0.6 } }}
+            exit={{ opacity: 0, transition: { duration: 2, ease: [0.4, 0, 0.2, 1] } }}
             onClick={onDone}
             role="progressbar"
             aria-label="Loading"
@@ -1495,34 +1530,38 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
                     </clipPath>
                 </defs>
                 {eyes.map((e) => {
-                    const g = stare || reduce ? { x: 0, y: 0 } : gaze[e.k] || { x: 0, y: 0 }
+                    const opened = reduce || pct >= e.th
+                    const g = stage > 0 || reduce ? { x: 0, y: 0 } : gaze[e.k] || { x: 0, y: 0 }
+                    const lid = stage === 1 ? 0.04 : 1
                     return (
                         <g key={e.k} transform={`translate(${e.x} ${e.y}) scale(${e.s})`}>
-                            <g style={reduce ? undefined : { transform: "scaleY(0)", animation: `tosOpen .35s ease-out ${e.open.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}>
-                                <g
-                                    style={
-                                        reduce || stare
-                                            ? undefined
-                                            : { animation: `tosEyeBlink ${e.bp.toFixed(2)}s ease-in-out ${(e.open + 0.4 + e.bd).toFixed(2)}s infinite`, transformBox: "fill-box", transformOrigin: "center" }
-                                    }
-                                >
-                                    <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="#cfc9be" />
-                                    <g clipPath="url(#tosAlmond)">
-                                        <g style={{ transform: `translate(${g.x}px, ${g.y}px)`, transition: stare ? "transform .45s cubic-bezier(.2,.9,.2,1)" : "transform .5s ease-in-out" }}>
-                                            <circle r={stare ? 13 : 11} fill={stare ? BLUE : BLUE_GLOW} style={{ transition: "r .5s ease, fill .5s ease" }} />
-                                            <circle r={stare ? 6.5 : 5} fill={INK} style={{ transition: "r .5s ease" }} />
-                                            <circle cx={-4} cy={-4} r={2.2} fill="#fff" />
+                            {/* opens when loading reaches this eye */}
+                            <g style={{ transform: `scaleY(${opened ? 1 : 0})`, transition: "transform .4s ease-out", transformBox: "fill-box", transformOrigin: "center" }}>
+                                {/* the shared close → open before the stare */}
+                                <g style={{ transform: `scaleY(${lid})`, transition: stage === 1 ? "transform .9s cubic-bezier(.5,0,.5,1)" : "transform 1.3s cubic-bezier(.3,0,.2,1)", transformBox: "fill-box", transformOrigin: "center" }}>
+                                    {/* each eye's own blink, only while loading */}
+                                    <g style={reduce || stage > 0 ? undefined : { animation: `tosEyeBlink ${e.bp.toFixed(2)}s ease-in-out ${e.bd.toFixed(2)}s infinite`, transformBox: "fill-box", transformOrigin: "center" }}>
+                                        <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="#cfc9be" />
+                                        <g clipPath="url(#tosAlmond)">
+                                            <g style={{ transform: `translate(${g.x}px, ${g.y}px)`, transition: stage > 0 ? "transform .6s ease" : "transform .6s ease-in-out" }}>
+                                                <circle r={staring ? 13 : 11} fill={staring ? BLUE : BLUE_GLOW} style={{ transition: "r 1.2s ease, fill 1.2s ease" }} />
+                                                <circle r={staring ? 6.5 : 5} fill={INK} style={{ transition: "r 1.2s ease" }} />
+                                                <circle cx={-4} cy={-4} r={2.2} fill="#fff" />
+                                            </g>
                                         </g>
+                                        <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="none" stroke="#0a0b0f" strokeWidth={2.5} />
                                     </g>
-                                    <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="none" stroke="#0a0b0f" strokeWidth={2.5} />
                                 </g>
                             </g>
                         </g>
                     )
                 })}
             </svg>
-            <div style={{ position: "absolute", inset: 0, background: stare ? "radial-gradient(ellipse at center, transparent 30%, rgba(5,6,10,.55) 100%)" : "rgba(5,6,10,.25)", transition: "background .6s ease", pointerEvents: "none" }} />
-            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "flex", gap: 14, alignItems: "baseline", padding: "6px 16px", background: "rgba(10,11,16,.85)", borderRadius: 8, color: TEXT, fontSize: 24, textTransform: "uppercase", whiteSpace: "nowrap" }} className="px">
+            <div style={{ position: "absolute", inset: 0, background: staring ? "radial-gradient(ellipse at center, transparent 30%, rgba(5,6,10,.55) 100%)" : "rgba(5,6,10,.25)", transition: "background 1.2s ease", pointerEvents: "none" }} />
+            <div
+                className="px"
+                style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "flex", gap: 14, alignItems: "baseline", padding: "6px 16px", background: "rgba(10,11,16,.85)", borderRadius: 8, color: TEXT, fontSize: 24, textTransform: "uppercase", whiteSpace: "nowrap", opacity: stage > 0 ? 0 : 1, transition: "opacity .8s ease" }}
+            >
                 <span>The Other Side</span>
                 <span style={{ color: BLUE_GLOW, minWidth: 52, textAlign: "right" }}>{pct}%</span>
             </div>
