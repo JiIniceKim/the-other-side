@@ -1548,6 +1548,7 @@ const PixelEye = memo(function PixelEye(props: { x: number; y: number; opened: b
         return () => {
             window.clearInterval(iv)
             ts.forEach((t) => window.clearTimeout(t))
+            setLid(2) // a blink cut off mid-way must not leave the lid shut
         }
     }, [opened, blink, blinkEvery])
     if (!opened) return null
