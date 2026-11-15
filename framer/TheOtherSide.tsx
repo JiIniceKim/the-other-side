@@ -1582,6 +1582,12 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
     const [stage, setStage] = useState(0)
     const [lidMax, setLidMax] = useState(2)
 
+    // A loader is atmosphere, not a gate. Framer can throttle nested timers in a published tab.
+    useEffect(() => {
+        const failSafe = window.setTimeout(props.onDone, reduce ? 1800 : 9000)
+        return () => window.clearTimeout(failSafe)
+    }, [props.onDone, reduce])
+
     const eyes = useMemo(() => {
         if (!box.ok) return []
         const cols = Math.ceil(box.w / EYE_W) + 1
@@ -1678,6 +1684,13 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
                 <span>The Other Side</span>
                 <span style={{ color: BLUE_GLOW, minWidth: 52, textAlign: "right" }}>{pct}%</span>
             </div>
+            <button
+                type="button"
+                onClick={props.onDone}
+                style={{ position: "absolute", left: "50%", bottom: 28, transform: "translateX(-50%)", color: TEXT, background: "rgba(10,11,16,.72)", border: "1px solid rgba(243,237,228,.3)", borderRadius: 999, padding: "10px 16px", fontSize: 12, letterSpacing: ".08em", textTransform: "uppercase", cursor: "pointer" }}
+            >
+                Skip intro loading
+            </button>
         </motion.div>
     )
 }
@@ -2143,6 +2156,7 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
             </div>
             <AnimatePresence mode="wait" initial={false}>
                 <motion.div key={step} initial={{ opacity: 0, x: reduce ? 0 : 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: reduce ? 0 : -24 }} transition={{ duration: 0.3 }} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                    <p className="px" style={{ margin: "0 0 8px", color: BLUE_GLOW, fontSize: 12, letterSpacing: ".14em", textTransform: "uppercase" }}>Before you judge someone else</p>
                     <h2 style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 22px", letterSpacing: "-0.02em" }}>{titles[step]}</h2>
                     {step === 0 && (
                         <form
@@ -2195,7 +2209,7 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
                     )}
                 </motion.div>
             </AnimatePresence>
-            <p style={{ margin: "16px 0 0", fontSize: 11, color: "#8d909b", textAlign: "center" }}>Stays on this device. Nothing is sent.</p>
+            <p style={{ margin: "16px 0 0", fontSize: 11, color: "#8d909b", textAlign: "center" }}>This sets your starting point. It stays on this device; nothing is sent.</p>
         </div>
     )
 }
@@ -2782,6 +2796,9 @@ function WatchedOverlay({step,picks,liked,watchers,reduce,onNext}: {step:number;
     return <div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
         <ScreenAudience picks={picks} reduce={reduce} />
         <div className="px" style={{position:"absolute",top:80,left:"50%",transform:"translateX(-50%)",fontSize:24,background:NIGHT,padding:"6px 14px",whiteSpace:"nowrap"}}>LIVE · {fmt(1204331 + watchers * 18240)} WATCHING</div>
+        {step >= 3 && step < 5 && <div style={{position:"absolute",left:"50%",top:126,transform:"translateX(-50%)",display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",width:"min(520px,calc(100% - 32px))",zIndex:6}}>
+            {[{label:"supportive",color:"#9ed7b1"},{label:"critical",color:"#ff9d8e"},{label:"uncertain",color:"#b8c3e8"}].map(tone => <span key={tone.label} style={{padding:"5px 10px",borderRadius:999,border:`1px solid ${tone.color}66`,color:tone.color,background:"rgba(10,12,18,.68)",fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>{tone.label} voices</span>)}
+        </div>}
         {step >= 5 && <button className="btn" onClick={onNext} style={{position:"absolute",bottom:28,left:"50%",transform:"translateX(-50%)",pointerEvents:"auto",zIndex:12}}>Continue <Icon name="next" size={18}/></button>}
     </div>
 }

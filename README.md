@@ -40,3 +40,10 @@ Tip: the component has a **Start at** property (Intro / Feed / Phone POV / Room)
 - **Blue is a highlight only**: screen light, the primary action, the liked comment, alerts. Everything else is dusk slate (outside) or warm lamp light (inside).
 - Minimal text per step: affordances (glowing hotspots, one primary action per screen) instead of instructions.
 - Accessibility: keyboard focus on every hotspot and choice, `prefers-reduced-motion` support, skippable transitions, a way back to the feed at every step.
+
+## Award-focused interaction notes
+
+- The loader is skippable and has a fail-safe exit so atmosphere never blocks the experience.
+- The feed asks visitors to choose one comment as their starting lens before the story begins.
+- The room turns private constraints into readable decisions, then the watched phase separates supportive, critical, and uncertain voices.
+- The visual language uses blue for surveillance and warm amber for human context; phase labels in the top bar keep the journey oriented.
