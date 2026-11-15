@@ -2135,13 +2135,8 @@ function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLike
 
 function EntryFlow(props: { profile: Profile | null; onDone: (p: Profile) => void; reduce: boolean }) {
     const { profile, onDone, reduce } = props
-    // 0 the question · 1 what this is + Continue · 2 the sign-up
+    // 0 the question + Start · 1 what this is + Continue · 2 the sign-up
     const [step, setStep] = useState(0)
-    useEffect(() => {
-        if (step !== 0) return
-        const t = window.setTimeout(() => setStep(1), reduce ? 1000 : 2600)
-        return () => window.clearTimeout(t)
-    }, [step, reduce])
     const fade = { initial: { opacity: 0, y: reduce ? 0 : 12 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: reduce ? 0 : -10 } }
     return (
         <AnimatePresence mode="wait">
@@ -2152,6 +2147,16 @@ function EntryFlow(props: { profile: Profile | null; onDone: (p: Profile) => voi
                         <br />
                         Or are you being watched?
                     </h1>
+                    <motion.button
+                        className="btn"
+                        onClick={() => setStep(1)}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.6, delay: reduce ? 0 : 1 }}
+                        style={{ marginTop: 40, minWidth: 160 }}
+                    >
+                        Start
+                    </motion.button>
                 </motion.div>
             )}
             {step === 1 && (
