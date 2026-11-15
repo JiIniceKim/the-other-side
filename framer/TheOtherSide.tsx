@@ -30,7 +30,7 @@ const TEXT = "#F3EDE4"
 
 type ObjId = "phone" | "laptop" | "bills" | "calendar" | "door"
 type Stats = { money: number; energy: number; grade: number }
-type Phase = "intro" | "feed" | "transit" | "room" | "watched" | "reveal" | "reflect" | "rewrite" | "epilogue"
+type Phase = "profile" | "intro" | "feed" | "transit" | "room" | "watched" | "yourpost" | "notify" | "yourmove" | "ending"
 
 interface Comment {
     id: string
@@ -216,6 +216,50 @@ function useBox(ref: RefObject<HTMLElement>) {
 const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
 const GRAIN = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")`
 
+/* ───────────────────────── Act 0 data: who are you ───────────────────────── */
+
+type TeamChoice = "carried" | "reported" | "slid"
+type CommentId = "c1" | "c2" | "c3" | "c4"
+interface Profile {
+    name: string
+    team: TeamChoice
+    comfort: string
+}
+
+const TEAM_OPTIONS: { id: TeamChoice; label: string }[] = [
+    { id: "carried", label: "I did their part too" },
+    { id: "reported", label: "I told the professor" },
+    { id: "slid", label: "I let it slide" },
+]
+const COMFORTS = ["late-night ramen", "cat videos", "long walks", "old sitcoms", "iced coffee", "gaming till 2AM"]
+const NAME_IDEAS = ["night.owl_27", "quiet.reader", "coffee.n.code", "sunday.walker", "pixel.person", "late.bloomer"]
+
+/* how your answer gets cut out of context — a little unfair, never cruel */
+const YOUR_CAPTION: Record<TeamChoice, string> = {
+    carried: "didn’t trust the team to do anything 😬 #groupproject",
+    reported: "went straight to the professor 👀 #groupproject",
+    slid: "let one person skip all the work lol #groupproject",
+}
+/* same kind of comment you liked on the college post, now about you */
+const YOUR_COMMENTS: Record<TeamChoice, Record<CommentId, string>> = {
+    carried: { c1: "Just split the work evenly next time lol", c2: "Should’ve managed the team better", c3: "Sounds like a control thing tbh", c4: "Why not just ask the TA?" },
+    reported: { c1: "Just talk to them first lol", c2: "Should’ve handled it yourself", c3: "Kinda dramatic tbh", c4: "Why not ask the TA instead?" },
+    slid: { c1: "Just tell them to do their part lol", c2: "Should’ve pushed them harder", c3: "Letting people walk all over you huh", c4: "Why didn’t you tell the professor??" },
+}
+const YOUR_HANDLES: Record<CommentId, string> = { c1: "fixit.felix", c2: "deans.list.dana", c3: "honest.opinion", c4: "just.asking_" }
+const YOUR_COUNTS: Record<CommentId, number> = { c1: 214, c2: 167, c3: 98, c4: 131 }
+
+function loadProfile(): Profile | null {
+    try {
+        const raw = safeGet("tos.profile")
+        if (!raw) return null
+        const p = JSON.parse(raw)
+        if (p && typeof p.name === "string" && TEAM_OPTIONS.some((o) => o.id === p.team) && typeof p.comfort === "string") return p
+    } catch {}
+    return null
+}
+const DEFAULT_PROFILE: Profile = { name: "night.owl_27", team: "reported", comfort: "late-night ramen" }
+
 /* ───────────────────────── Bitmap marks ───────────────────────── */
 
 function Bitmap(props: { map: string[]; size: number; color: string }) {
@@ -293,41 +337,6 @@ function wrapText(text: string, max: number) {
     return lines
 }
 
-function TextFigure(props: { text: string; fg: string; ink: string; label: string; style?: CSSProperties }) {
-    const { text, fg, ink, label, style } = props
-    const cid = useId().replace(/[^a-zA-Z0-9]/g, "")
-    const W = 200
-    const H = FIG.length * CELL
-    const lines = useMemo(() => {
-        const base = wrapText(text || "…", 24)
-        const out: string[] = []
-        while (out.length < 27) out.push(...base, "")
-        return out.slice(0, 27)
-    }, [text])
-    return (
-        <svg viewBox={`-30 -20 ${W + 60} ${H + 40}`} role="img" aria-label={label} style={{ display: "block", overflow: "visible", ...style }}>
-            <defs>
-                <clipPath id={`fig${cid}`}>
-                    {CELLS.map((c) => (
-                        <rect key={`${c.i}-${c.j}`} x={c.j * CELL} y={c.i * CELL} width={CELL + 0.5} height={CELL + 0.5} />
-                    ))}
-                </clipPath>
-            </defs>
-            <g fill={fg}>
-                {CELLS.map((c) => (
-                    <rect key={`${c.i}-${c.j}`} x={c.j * CELL} y={c.i * CELL} width={CELL + 0.5} height={CELL + 0.5} />
-                ))}
-            </g>
-            <g clipPath={`url(#fig${cid})`} fill={ink} style={{ fontFamily: "VT323, monospace", fontSize: 14 }}>
-                {lines.map((l, k) => (
-                    <text key={k} x={6} y={14 + k * 13.4}>
-                        {l}
-                    </text>
-                ))}
-            </g>
-        </svg>
-    )
-}
 
 /* ───────────────────────── Icons ───────────────────────── */
 
@@ -945,7 +954,7 @@ function RoomSVG(props: { beat: number; buzz: boolean }) {
 interface Props {
     storyHandle: string
     caption: string
-    startAt?: "intro" | "feed" | "pov" | "room"
+    startAt?: "intro" | "profile" | "feed" | "pov" | "room" | "yourpost" | "yourmove"
     style?: CSSProperties
 }
 
@@ -963,10 +972,11 @@ export default function TheOtherSide(props: Props) {
     const reduce = useReducedMotion() || false
 
     const startAt = props.startAt || "intro"
-    const [phase, setPhase] = useState<Phase>(startAt === "pov" ? "transit" : startAt)
+    const firstPhase = (a: typeof startAt): Phase => (a === "intro" ? "profile" : a === "pov" ? "transit" : a)
+    const [phase, setPhase] = useState<Phase>(firstPhase(startAt))
     useEffect(() => {
-        setPhase(startAt === "pov" ? "transit" : startAt)
-        if (startAt === "room" || startAt === "pov") setLiked("c1")
+        setPhase(firstPhase(startAt))
+        if (startAt !== "intro" && startAt !== "feed" && startAt !== "profile") setLiked("c1")
         if (startAt === "pov") setTransitStep(3)
     }, [startAt])
     const [introStep, setIntroStep] = useState(0)
@@ -991,8 +1001,9 @@ export default function TheOtherSide(props: Props) {
     const [watchStep, setWatchStep] = useState(0)
     const [watchers, setWatchers] = useState(0)
     const [flash, setFlash] = useState<string | null>(null)
-    const [epiStep, setEpiStep] = useState(0)
-    const [kept, setKept] = useState(false)
+    const [endStep, setEndStep] = useState(0)
+    const [profile, setProfile] = useState<Profile | null>(null)
+    const prof = profile || DEFAULT_PROFILE
 
     useEffect(() => {
         const saved = safeGet("tos.comment")
@@ -1003,6 +1014,7 @@ export default function TheOtherSide(props: Props) {
             })
         }
         if (safeGet("tos.coach")) setCoachSeen(true)
+        setProfile(loadProfile())
     }, [])
 
     const likedComment = COMMENTS.find((c) => c.id === liked) || null
@@ -1062,6 +1074,14 @@ export default function TheOtherSide(props: Props) {
     }, [phase, introStep, crowdLit, reduce])
 
     const openFeed = () => startTransition(() => setPhase("feed"))
+    const onProfileDone = (p: Profile) => {
+        setProfile(p)
+        safeSet("tos.profile", JSON.stringify(p))
+        startTransition(() => {
+            setPhase("intro")
+            setIntroStep(1)
+        })
+    }
 
     /* ── like a comment → zoom out → into another window ── */
     const likeComment = (id: string) => {
@@ -1181,13 +1201,13 @@ export default function TheOtherSide(props: Props) {
         setSocratic(null)
         setHint(pick)
     }
-    const finish = (text: string | null) => {
-        const c = text && text.trim() ? text.trim() : likedComment?.text || ""
-        setNewComment(c)
-        safeSet("tos.comment", c)
-        setKept(!(text && text.trim()))
-        setEpiStep(0)
-        startTransition(() => setPhase("epilogue"))
+    const finishMove = (r: { unliked: boolean; text: string | null }) => {
+        if (r.text) {
+            setNewComment(r.text)
+            safeSet("tos.comment", r.text)
+        }
+        setEndStep(0)
+        startTransition(() => setPhase("ending"))
     }
     const endToFeed = () => {
         setDone(true)
@@ -1198,10 +1218,14 @@ export default function TheOtherSide(props: Props) {
         })
     }
     useEffect(() => {
-        if (phase !== "epilogue") return
-        const seq = reduce ? [100, 300, 600] : [1000, 3000, 4600]
-        const ts = seq.map((ms, i) => window.setTimeout(() => setEpiStep(i + 1), ms))
-        return () => ts.forEach((t) => window.clearTimeout(t))
+        if (phase !== "ending") return
+        const t = window.setTimeout(() => setEndStep(1), reduce ? 100 : 2600)
+        return () => window.clearTimeout(t)
+    }, [phase, reduce])
+    useEffect(() => {
+        if (phase !== "notify") return
+        const t = window.setTimeout(ding, reduce ? 200 : 1800)
+        return () => window.clearTimeout(t)
     }, [phase, reduce])
 
     /* ── facade state per phase ── */
@@ -1238,25 +1262,25 @@ export default function TheOtherSide(props: Props) {
             WATCH_ORDER.slice(0, watchers).forEach((k) => (lit[k] = "watcher"))
             focus = STUDENT
             duration = 1.6
-            if (watchStep >= 4) {
-                lit[v] = "watcher"
-                focus = VIEWER
-                level = "near"
-                duration = 2
-            }
-        } else if (phase === "epilogue") {
-            lit[s] = epiStep >= 2 && !kept ? "bright" : "amber"
-            lit[v] = epiStep >= 2 && !kept ? "amber" : "blue"
-            focus = STUDENT
-            level = epiStep >= 1 ? "near" : "overview"
-            duration = 2
+        } else if (phase === "notify" || phase === "yourmove") {
+            lit[v] = "watcher"
+            lit[s] = "amber"
+            focus = VIEWER
+            level = "near"
+            duration = 2.2
+        } else if (phase === "ending") {
+            lit[v] = "watcher"
+            lit[s] = "amber"
+            duration = 2.4
         }
-        const reticleAt: Spot | null = phase === "watched" && watchStep >= 1 ? (watchStep >= 4 ? VIEWER : STUDENT) : null
+        const reticleAt: Spot | null = phase === "watched" && watchStep >= 1 ? STUDENT : null
         return { lit, level, focus, duration, reticleAt }
-    }, [phase, introStep, transitStep, watchers, watchStep, epiStep, kept, crowdLit])
+    }, [phase, introStep, transitStep, watchers, watchStep, crowdLit])
 
-    const showFacade = phase === "intro" || phase === "feed" || (phase === "transit" && transitStep < 4) || phase === "watched" || phase === "epilogue"
-    const progress = phase === "intro" || phase === "feed" ? 0 : phase === "transit" || phase === "room" ? 1 : phase === "watched" ? 2 : 3
+    const showFacade = phase === "profile" || phase === "intro" || phase === "feed" || (phase === "transit" && transitStep < 4) || phase === "watched" || phase === "notify" || phase === "yourmove" || phase === "ending"
+    const progress = phase === "profile" || phase === "intro" || phase === "feed" ? 0 : phase === "transit" || phase === "room" ? 1 : phase === "watched" ? 2 : 3
+    const behindPhone = phase === "feed" || phase === "yourmove" || phase === "profile"
+    const facadeKey = phase === "watched" ? "fw" : phase === "ending" ? "fe" : phase === "notify" || phase === "yourmove" ? "fn" : "fm"
     const finalCaption = picks[2]?.id === "stay" ? "on academic probation lol 💀 #college" : caption
 
     return (
@@ -1266,11 +1290,11 @@ export default function TheOtherSide(props: Props) {
 
             {showFacade && (
                 <motion.div
-                    key={phase === "watched" ? "fw" : phase === "epilogue" ? "fe" : "fm"}
-                    initial={{ opacity: phase === "watched" || phase === "epilogue" ? 0 : 1 }}
+                    key={facadeKey}
+                    initial={{ opacity: facadeKey === "fm" ? 1 : 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.8 }}
-                    style={{ position: "absolute", inset: 0, filter: phase === "feed" ? "blur(6px) brightness(.55)" : "blur(0px) brightness(1)", transition: "filter .8s ease" }}
+                    style={{ position: "absolute", inset: 0, filter: behindPhone ? "blur(6px) brightness(.55)" : "blur(0px) brightness(1)", transition: "filter .8s ease" }}
                 >
                     <Facade lit={facade.lit} level={facade.level} focus={facade.focus} duration={reduce ? 0.01 : facade.duration} initialLevel={phase === "watched" ? "near" : undefined} reticle={facade.reticleAt} lens={phase === "intro" && introStep < 2 ? { ...lensPos, phones: introStep >= 1 } : null} />
                     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
@@ -1280,13 +1304,21 @@ export default function TheOtherSide(props: Props) {
                 </motion.div>
             )}
 
-            {phase !== "intro" && phase !== "feed" && (
-                <TopBar progress={progress} onBack={toFeed} onSkip={phase === "transit" ? () => setPhase("room") : phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : undefined} />
+            {phase !== "profile" && phase !== "intro" && phase !== "feed" && phase !== "yourmove" && (
+                <TopBar progress={progress} onBack={toFeed} onSkip={phase === "transit" ? () => setPhase("room") : phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : phase === "yourpost" ? () => setPhase("notify") : undefined} />
             )}
 
-            <AnimatePresence>{loading && phase === "intro" && <Loader onDone={() => setLoading(false)} reduce={reduce} />}</AnimatePresence>
+            <AnimatePresence>{loading && (phase === "profile" || phase === "intro") && <Loader onDone={() => setLoading(false)} reduce={reduce} />}</AnimatePresence>
 
             <AnimatePresence mode="wait" initial={false}>
+                {phase === "profile" && (
+                    <motion.div key="profile" initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.94 }} transition={{ duration: 0.45 }} style={{ position: "absolute", inset: 0 }}>
+                        <div className="phone">
+                            <ProfileSetup initial={profile} onDone={onProfileDone} reduce={reduce} />
+                        </div>
+                    </motion.div>
+                )}
+
                 {phase === "intro" && (
                     <motion.div key="intro" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
                         <Intro step={introStep} onBegin={beginIntro} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} onLens={(x, y) => introStep === 0 && setLensPos({ x, y })} />
@@ -1364,36 +1396,55 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "watched" && (
                     <motion.div key="watched" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} style={{ position: "absolute", inset: 0 }}>
-                        <WatchedOverlay step={watchStep} picks={picks} liked={likedComment} watchers={watchers} reduce={reduce} onNext={() => setPhase("reveal")} />
+                        <WatchedOverlay step={watchStep} picks={picks} liked={likedComment} watchers={watchers} reduce={reduce} onNext={() => setPhase("yourpost")} />
                     </motion.div>
                 )}
 
-                {phase === "epilogue" && (
-                    <motion.div key="epilogue" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
-                        <Epilogue step={epiStep} comment={newComment || ""} kept={kept} reduce={reduce} onFeed={endToFeed} />
+                {phase === "yourpost" && (
+                    <motion.div key="yourpost" initial={startAt === "yourpost" ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} style={{ position: "absolute", inset: 0 }}>
+                        <YourPostPOV profile={prof} likedId={(liked || "c1") as CommentId} reduce={reduce} still={startAt === "yourpost"} onDone={() => setPhase("notify")} />
                     </motion.div>
                 )}
 
-                {phase === "reveal" && (
-                    <motion.div key="reveal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
-                        <Reveal caption={finalCaption} handle={storyHandle} liked={likedComment} visited={visited} picks={picks} onNext={() => setPhase("reflect")} reduce={reduce} />
+                {phase === "notify" && (
+                    <motion.div key="notify" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
+                        <motion.button
+                            onClick={() => setPhase("yourmove")}
+                            initial={{ y: reduce ? 0 : -120, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: reduce ? 0 : 1.8, type: "spring", stiffness: 260, damping: 24 }}
+                            className="glass"
+                            aria-label={`Someone liked a comment on your post: ${YOUR_COMMENTS[prof.team][(liked || "c1") as CommentId]}. Open.`}
+                            style={{ position: "absolute", top: 70, left: "50%", x: "-50%", width: "min(420px, calc(100% - 32px))", display: "flex", gap: 12, alignItems: "center", padding: 12, textAlign: "left", background: "rgba(28,30,38,.9)", borderRadius: 20, zIndex: 5 }}
+                        >
+                            <span style={{ width: 40, height: 40, borderRadius: 10, background: BLUE, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                <Bitmap map={EYE} size={24} color="#fff" />
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#a8abb6" }}>
+                                    <span>THE OTHER SIDE</span>
+                                    <span>now</span>
+                                </span>
+                                <span style={{ display: "block", fontWeight: 700, fontSize: 15, marginTop: 2 }}>Someone liked a comment on your post</span>
+                                <span style={{ display: "block", fontSize: 14, color: "#d4d6de", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    ♥ “{YOUR_COMMENTS[prof.team][(liked || "c1") as CommentId]}”
+                                </span>
+                            </span>
+                        </motion.button>
                     </motion.div>
                 )}
 
-                {(phase === "reflect" || phase === "rewrite") && (
-                    <motion.div key="reflect" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} style={{ position: "absolute", inset: 0, background: NIGHT }}>
-                        <Reflect
-                            phase={phase}
-                            liked={likedComment}
-                            draft={draft}
-                            setDraft={setDraft}
-                            onKeep={() => finish(null)}
-                            onRewrite={() => {
-                                setDraft(likedComment?.text || "")
-                                setPhase("rewrite")
-                            }}
-                            onPost={() => finish(draft)}
-                        />
+                {phase === "yourmove" && (
+                    <motion.div key="yourmove" initial={{ opacity: 0, scale: reduce ? 1 : 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.92 }} transition={{ duration: 0.45 }} style={{ position: "absolute", inset: 0 }}>
+                        <div className="phone">
+                            <YourMove profile={prof} likedId={(liked || "c1") as CommentId} handle={storyHandle} caption={caption} reduce={reduce} onFinish={finishMove} />
+                        </div>
+                    </motion.div>
+                )}
+
+                {phase === "ending" && (
+                    <motion.div key="ending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
+                        <Ending step={endStep} onFeed={endToFeed} reduce={reduce} />
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -1857,11 +1908,403 @@ function PhonePOV(props: { lowered: boolean; liked: Comment | null; handle: stri
     )
 }
 
+/* ───────────────────────── Shared: a hand holding a phone (first person) ───────────────────────── */
+
+function HandPhone(props: { children: ReactNode; lowered?: boolean; still?: boolean; reduce: boolean }) {
+    const { children, lowered = false, still, reduce } = props
+    const skin = "#b9825f"
+    const shade = "#8e5c40"
+    return (
+        <motion.div
+            initial={still ? false : { y: reduce ? "0%" : "35%", rotate: -3, opacity: 0 }}
+            animate={lowered ? { y: "135%", rotate: -16, opacity: 1 } : { y: "0%", rotate: -3, opacity: 1 }}
+            transition={lowered ? { duration: reduce ? 0.01 : 1.1, ease: [0.5, 0, 0.75, 0] } : { duration: reduce ? 0.01 : 0.9, ease: [0.2, 0.8, 0.2, 1] }}
+            style={{ position: "absolute", left: "50%", bottom: "-4%", x: "-50%", width: "min(330px, 62vw)", aspectRatio: "9 / 18.5" }}
+        >
+            <div style={{ position: "absolute", inset: 0, borderRadius: 38, border: "9px solid #0a0a0d", background: NIGHT, overflow: "hidden", boxShadow: `0 0 90px rgba(110,123,255,.35)` }}>{children}</div>
+            <svg viewBox="0 0 520 300" aria-hidden="true" style={{ position: "absolute", left: "-30%", width: "160%", top: "55%", height: "70%", overflow: "visible" }} preserveAspectRatio="none">
+                <path d="M40 300 C50 262 110 244 200 247 L360 247 C430 250 480 270 492 300 Z" fill="#2a2230" />
+                <path d="M72 290 C60 226 92 170 152 160 L382 150 C442 152 470 202 468 290 Z" fill={skin} />
+                <path d="M152 160 L382 150" stroke={shade} strokeWidth="3" opacity=".5" />
+                <path d="M86 252 C70 200 80 150 106 116 C120 98 142 102 144 122 C146 142 130 172 128 212 Z" fill={skin} stroke={shade} strokeWidth="3" />
+                {[0, 1, 2].map((i) => (
+                    <rect key={i} x="406" y={72 + i * 42} width="54" height="36" rx="18" fill={skin} stroke={shade} strokeWidth="3" />
+                ))}
+            </svg>
+        </motion.div>
+    )
+}
+
+/* the room behind the phone, out of focus */
+function BlurredRoom(props: { beat: number; sharp?: boolean; reduce: boolean }) {
+    const { beat, sharp, reduce } = props
+    const ref = useRef<HTMLDivElement>(null)
+    const box = useBox(ref)
+    const scale = Math.max(box.w / 1600, box.h / 900)
+    const sw = 1600 * scale
+    const sh = 900 * scale
+    return (
+        <div ref={ref} style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f" }}>
+            <div style={{ position: "absolute", left: (box.w - sw) / 2, top: (box.h - sh) / 2, width: sw, height: sh, filter: sharp ? "none" : "blur(10px) brightness(.4)", transform: sharp ? "none" : "scale(1.1) translateY(5%)", transition: reduce ? "none" : "filter 1.8s ease, transform 2s ease" }}>
+                <RoomSVG beat={beat} buzz={false} />
+            </div>
+            <div className="vignette" />
+        </div>
+    )
+}
+
+/* a comment row, the way every app draws one */
+function CommentRow(props: { handle: string; text: string; count: number; liked?: boolean; pop?: boolean; size?: "s" | "m"; onHeart?: () => void; heartLabel?: string; note?: string; pulse?: boolean; reduce?: boolean }) {
+    const { handle, text, count, liked, pop, size = "s", onHeart, heartLabel, note, pulse, reduce } = props
+    const fs = size === "s" ? 12 : 14
+    const heart = (
+        <motion.span animate={pop && !reduce ? { scale: [1, 1.7, 1] } : pulse && !reduce ? { scale: [1, 1.18, 1] } : { scale: 1 }} transition={pulse && !pop ? { duration: 1.2, repeat: Infinity } : { duration: 0.45 }} style={{ display: "grid", color: liked ? BLUE_GLOW : "#7c7f8a" }}>
+            <Icon name="heart" size={size === "s" ? 13 : 18} fill={!!liked} />
+        </motion.span>
+    )
+    return (
+        <div style={{ display: "flex", gap: 8, padding: size === "s" ? "6px 4px" : "8px 6px", alignItems: "flex-start" }}>
+            <span aria-hidden="true" style={{ width: size === "s" ? 18 : 26, height: size === "s" ? 18 : 26, borderRadius: 99, background: "rgba(255,255,255,.14)", flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: fs - 2, color: "#9a9da8" }}>@{handle}</div>
+                <div style={{ fontSize: fs, lineHeight: 1.3 }}>{text}</div>
+                {note && <div style={{ fontSize: fs - 3, color: BLUE_GLOW, marginTop: 2, fontWeight: 600 }}>{note}</div>}
+            </div>
+            {onHeart ? (
+                <button onClick={onHeart} aria-pressed={!!liked} aria-label={heartLabel} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 44, minHeight: 44, justifyContent: "center", fontSize: fs - 3, color: "#9a9da8" }}>
+                    {heart}
+                    {fmt(count)}
+                </button>
+            ) : (
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "center", fontSize: fs - 3, color: "#9a9da8", minWidth: 28 }}>
+                    {heart}
+                    {fmt(count)}
+                </span>
+            )}
+        </div>
+    )
+}
+
+/* your post: a group-project table at night, a little out of context */
+function TeamArt(props: { comfort: string }) {
+    const id = useId().replace(/[^a-zA-Z0-9]/g, "")
+    return (
+        <svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" aria-hidden="true" style={{ display: "block" }}>
+            <defs>
+                <radialGradient id={`lamp${id}`} cx=".5" cy=".3" r=".7">
+                    <stop offset="0" stopColor="#ffd9a6" stopOpacity=".55" />
+                    <stop offset="1" stopColor="#ffd9a6" stopOpacity="0" />
+                </radialGradient>
+            </defs>
+            <rect width="400" height="300" fill="#2a2430" />
+            <rect width="400" height="300" fill={`url(#lamp${id})`} />
+            <rect x="0" y="0" width="400" height="120" fill="#332b38" />
+            <rect x="40" y="26" width="120" height="70" rx="4" fill="#efe7d8" opacity=".9" />
+            <text x="100" y="56" textAnchor="middle" fill="#6b5f52" style={{ fontFamily: "Georgia, serif", fontSize: 13 }}>
+                FINAL PROJECT
+            </text>
+            <text x="100" y="76" textAnchor="middle" fill="#9a8f80" style={{ fontFamily: "Georgia, serif", fontSize: 10 }}>
+                due Friday
+            </text>
+            <polygon points="20,190 380,190 400,300 0,300" fill="#6d4a33" />
+            <polygon points="20,190 380,190 382,198 18,198" fill="#8a6142" />
+            {[60, 150, 250, 330].map((x, i) => (
+                <g key={i}>
+                    <rect x={x - 18} y={140} width="36" height="52" rx="8" fill={i === 2 ? "#3a3240" : "#1c1820"} />
+                    {i !== 2 && <circle cx={x} cy={128} r="14" fill="#1c1820" />}
+                </g>
+            ))}
+            <rect x="232" y="150" width="36" height="20" rx="6" fill="#5a3a30" opacity=".8" />
+            <rect x="150" y="200" width="100" height="58" rx="4" fill="#1b1e28" />
+            <rect x="156" y="206" width="88" height="44" rx="2" fill="#4c5bff" opacity=".85" />
+            <rect x="250" y="216" width="70" height="40" fill="#f6d77a" transform="rotate(6 285 236)" />
+            <text x="285" y="240" textAnchor="middle" fill="#5b4a1e" transform="rotate(6 285 236)" style={{ fontFamily: "Georgia, serif", fontSize: 9, fontStyle: "italic" }}>
+                {props.comfort.length > 14 ? props.comfort.slice(0, 13) + "…" : props.comfort}?
+            </text>
+            <rect x="80" y="210" width="44" height="30" rx="3" fill="#e9e2d4" transform="rotate(-8 102 225)" />
+        </svg>
+    )
+}
+
+function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLiked: boolean; pop?: boolean; size?: "s" | "m"; reduce: boolean }) {
+    const { profile, likedId, studentLiked, pop, size = "s", reduce } = props
+    const ids: CommentId[] = ["c3", "c1", "c4", "c2"]
+    return (
+        <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ width: size === "s" ? 22 : 28, height: size === "s" ? 22 : 28, borderRadius: 99, background: BLUE, display: "grid", placeItems: "center" }}>
+                    <Bitmap map={EYE} size={size === "s" ? 13 : 16} color="#fff" />
+                </span>
+                <span style={{ fontWeight: 700, fontSize: size === "s" ? 12 : 14 }}>@{profile.name}</span>
+            </div>
+            <div style={{ position: "relative", aspectRatio: "4 / 3", borderRadius: 10, overflow: "hidden" }}>
+                <TeamArt comfort={profile.comfort} />
+            </div>
+            <p style={{ fontSize: size === "s" ? 12 : 14, fontWeight: 600, margin: "8px 0 8px" }}>
+                <span style={{ color: "#9a9da8" }}>@{profile.name}</span> {YOUR_CAPTION[profile.team]}
+            </p>
+            {ids.map((cid) => (
+                <CommentRow key={cid} handle={YOUR_HANDLES[cid]} text={YOUR_COMMENTS[profile.team][cid]} count={YOUR_COUNTS[cid] + (cid === likedId && studentLiked ? 1 : 0)} liked={cid === likedId && studentLiked} pop={cid === likedId && pop} size={size} reduce={reduce} />
+            ))}
+        </div>
+    )
+}
+
+/* ───────────────────────── Act 0: who are you (a sign-up, nothing more) ───────────────────────── */
+
+function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => void; reduce: boolean }) {
+    const { initial, onDone, reduce } = props
+    const [step, setStep] = useState(0)
+    const [name, setName] = useState(initial?.name || NAME_IDEAS[Math.floor(Math.random() * NAME_IDEAS.length)])
+    const [team, setTeam] = useState<TeamChoice | null>(initial?.team || null)
+    const inputRef = useRef<HTMLInputElement>(null)
+    useEffect(() => {
+        if (step === 0) window.setTimeout(() => inputRef.current?.focus(), 400)
+    }, [step])
+    const clean = (v: string) => v.toLowerCase().replace(/[^a-z0-9._]/g, "").slice(0, 18)
+    const finish = (comfort: string) => onDone({ name: clean(name) || "you", team: team || "reported", comfort })
+    const titles = ["Create your profile", "Group project. One teammate did nothing. You…", "Your comfort thing?"]
+    return (
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", padding: "22px 18px 18px", color: TEXT }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Bitmap map={EYE} size={22} color={TEXT} />
+                    <span className="px" style={{ fontSize: 22, textTransform: "uppercase" }}>
+                        The Other Side
+                    </span>
+                </div>
+                <ol aria-label={`Step ${step + 1} of 3`} style={{ display: "flex", gap: 5, listStyle: "none", margin: 0, padding: 0 }}>
+                    {[0, 1, 2].map((i) => (
+                        <li key={i} style={{ width: i === step ? 18 : 6, height: 6, borderRadius: 9, background: i <= step ? BLUE_GLOW : "rgba(255,255,255,.2)", transition: "all .3s" }} />
+                    ))}
+                </ol>
+            </div>
+            <AnimatePresence mode="wait" initial={false}>
+                <motion.div key={step} initial={{ opacity: 0, x: reduce ? 0 : 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: reduce ? 0 : -24 }} transition={{ duration: 0.3 }} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                    <h2 style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 22px", letterSpacing: "-0.02em" }}>{titles[step]}</h2>
+                    {step === 0 && (
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault()
+                                setStep(1)
+                            }}
+                            style={{ display: "flex", flexDirection: "column", gap: 18, flex: 1 }}
+                        >
+                            <span aria-hidden="true" style={{ width: 84, height: 84, borderRadius: 99, background: "rgba(110,123,255,.18)", border: `2px dashed ${BLUE_GLOW}`, display: "grid", placeItems: "center", alignSelf: "center" }}>
+                                <Bitmap map={EYE} size={40} color={BLUE_GLOW} />
+                            </span>
+                            <label style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 14px", borderRadius: 12, background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.14)", height: 52 }}>
+                                <span style={{ color: "#9a9da8", fontSize: 17 }}>@</span>
+                                <span style={srOnly}>Nickname</span>
+                                <input ref={inputRef} value={name} onChange={(e) => setName(clean(e.target.value))} maxLength={18} autoComplete="off" style={{ flex: 1, background: "transparent", border: 0, outline: "none", color: TEXT, fontSize: 17, fontFamily: "inherit" }} />
+                            </label>
+                            <div style={{ flex: 1 }} />
+                            <button type="submit" className="btn" disabled={!clean(name)} style={{ width: "100%" }}>
+                                Next
+                            </button>
+                        </form>
+                    )}
+                    {step === 1 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            {TEAM_OPTIONS.map((o) => (
+                                <button
+                                    key={o.id}
+                                    onClick={() => {
+                                        setTeam(o.id)
+                                        window.setTimeout(() => setStep(2), reduce ? 0 : 180)
+                                    }}
+                                    className="ghost"
+                                    aria-pressed={team === o.id}
+                                    style={{ justifyContent: "flex-start", textAlign: "left", width: "100%", minHeight: 54, borderRadius: 12, background: team === o.id ? "rgba(110,123,255,.2)" : undefined, borderColor: team === o.id ? BLUE_GLOW : undefined }}
+                                >
+                                    {o.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {step === 2 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                            {COMFORTS.map((c) => (
+                                <button key={c} onClick={() => finish(c)} className="ghost" style={{ borderRadius: 999, minHeight: 46, padding: "8px 16px" }}>
+                                    {c}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </motion.div>
+            </AnimatePresence>
+            <p style={{ margin: "16px 0 0", fontSize: 11, color: "#8d909b", textAlign: "center" }}>Stays on this device. Nothing is sent.</p>
+        </div>
+    )
+}
+
+/* ───────────────────────── Act 4: the student picks the phone back up ───────────────────────── */
+
+function YourPostPOV(props: { profile: Profile; likedId: CommentId; reduce: boolean; still?: boolean; onDone: () => void }) {
+    const { profile, likedId, reduce, still, onDone } = props
+    const [step, setStep] = useState(still ? 2 : 0) // 0 scrolling · 1 stopped on your post · 2 like lands
+    useEffect(() => {
+        if (still) return
+        const seq = reduce ? [300, 900, 2600] : [2600, 4400, 7000]
+        const ts = seq.map((ms, i) => window.setTimeout(() => (i < 2 ? setStep(i + 1) : onDone()), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [still, reduce])
+    return (
+        <div style={{ position: "absolute", inset: 0 }}>
+            <BlurredRoom beat={3} reduce={reduce} />
+            <HandPhone still={still} reduce={reduce}>
+                <div style={{ height: "100%", overflow: "hidden", position: "relative" }}>
+                    <motion.div initial={still ? false : { y: 0 }} animate={{ y: step >= 1 ? -300 : 0 }} transition={{ duration: reduce ? 0.01 : 2.2, ease: [0.3, 0, 0.2, 1] }} style={{ padding: "14px 12px", color: TEXT }}>
+                        {/* someone else's post scrolls past first */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 99, background: "rgba(255,255,255,.2)" }} />
+                            <span style={{ fontWeight: 700, fontSize: 12 }}>@exhibit_002</span>
+                        </div>
+                        <div style={{ position: "relative", aspectRatio: "4 / 3", borderRadius: 10, overflow: "hidden", marginBottom: 8 }}>
+                            <PostArt kind="read" />
+                        </div>
+                        <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 24px" }}>left everyone on read for 3 months</p>
+                        <YourPostCard profile={profile} likedId={likedId} studentLiked={step >= 2} pop={step >= 2} reduce={reduce} />
+                    </motion.div>
+                </div>
+            </HandPhone>
+        </div>
+    )
+}
+
+/* ───────────────────────── Act 5: your phone, your move ───────────────────────── */
+
+function YourMove(props: { profile: Profile; likedId: CommentId; handle: string; caption: string; reduce: boolean; onFinish: (r: { unliked: boolean; text: string | null }) => void }) {
+    const { profile, likedId, handle, caption, reduce, onFinish } = props
+    const liked = COMMENTS.find((c) => c.id === likedId) || COMMENTS[0]
+    const [unliked, setUnliked] = useState(false)
+    const [compose, setCompose] = useState(false)
+    const [draft, setDraft] = useState("")
+    const [hintOn, setHintOn] = useState(false)
+    const taRef = useRef<HTMLTextAreaElement>(null)
+    useEffect(() => {
+        const t = window.setTimeout(() => setHintOn(true), reduce ? 0 : 3500)
+        return () => window.clearTimeout(t)
+    }, [reduce])
+    useEffect(() => {
+        if (compose) window.setTimeout(() => taRef.current?.focus(), 350)
+    }, [compose])
+    const toggle = () => {
+        if (unliked) {
+            setUnliked(false)
+            setCompose(false)
+            return
+        }
+        setUnliked(true)
+        window.setTimeout(() => setCompose(true), reduce ? 0 : 450)
+    }
+    return (
+        <div style={{ position: "absolute", inset: 0, color: TEXT }}>
+            <div className="scroll" style={{ position: "absolute", inset: 0, padding: "16px 14px 96px" }}>
+                <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px 14px" }}>
+                    <Bitmap map={EYE} size={22} color={TEXT} />
+                    <span className="px" style={{ fontSize: 22, textTransform: "uppercase" }}>
+                        The Other Side
+                    </span>
+                </header>
+                <div style={{ borderRadius: 16, background: "#171a22", padding: 12, marginBottom: 14, border: "1px solid rgba(255,255,255,.06)" }}>
+                    <YourPostCard profile={profile} likedId={likedId} studentLiked size="m" reduce={reduce} />
+                </div>
+                <div style={{ borderRadius: 16, background: "#171a22", padding: 12, border: "1px solid rgba(255,255,255,.06)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <span style={{ width: 28, height: 28, borderRadius: 99, background: "rgba(255,255,255,.2)", border: "1.5px solid #fff" }} />
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>@{handle}</span>
+                    </div>
+                    <div style={{ position: "relative", aspectRatio: "4 / 3", borderRadius: 10, overflow: "hidden" }}>
+                        <PostArt kind="dropout" />
+                    </div>
+                    <p style={{ fontSize: 14, fontWeight: 600, margin: "8px 0" }}>{caption}</p>
+                    <CommentRow
+                        handle={liked.handle}
+                        text={liked.text}
+                        count={liked.likes + (unliked ? 0 : 1)}
+                        liked={!unliked}
+                        size="m"
+                        onHeart={toggle}
+                        heartLabel={unliked ? `Like again: ${liked.text}` : `Unlike: ${liked.text}`}
+                        note={unliked ? undefined : "Liked by you"}
+                        pulse={hintOn && !unliked}
+                        reduce={reduce}
+                    />
+                </div>
+            </div>
+            {/* bottom bar */}
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "12px 14px 16px", background: "linear-gradient(180deg, rgba(16,19,26,0), rgba(16,19,26,.95) 30%)", display: "flex", justifyContent: "center" }}>
+                {!compose && (
+                    <button className="ghost" onClick={() => onFinish({ unliked, text: null })} style={{ minWidth: 140, borderRadius: 999 }}>
+                        Done
+                    </button>
+                )}
+            </div>
+            {/* composer: only after you take the like back */}
+            <AnimatePresence>
+                {compose && (
+                    <motion.div key="compose" initial={{ y: reduce ? 0 : "100%", opacity: reduce ? 0 : 1 }} animate={{ y: 0, opacity: 1 }} exit={{ y: reduce ? 0 : "100%", opacity: reduce ? 0 : 1 }} transition={{ type: "spring", damping: 30, stiffness: 300 }} style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "#1b1e27", borderRadius: "20px 20px 0 0", padding: "16px 16px 18px", borderTop: "1px solid rgba(255,255,255,.08)", zIndex: 5 }}>
+                        <div className="serif" aria-hidden="true" style={{ display: "flex", gap: 12, flexWrap: "wrap", fontStyle: "italic", fontSize: 19, marginBottom: 10, color: "#d8d2c8" }}>
+                            <span>is it true?</span>
+                            <span style={{ color: BLUE_GLOW }}>is it kind?</span>
+                            <span>is it necessary?</span>
+                        </div>
+                        <label htmlFor="tos-reply" style={srOnly}>
+                            Write a comment on @{handle}’s post
+                        </label>
+                        <textarea
+                            id="tos-reply"
+                            ref={taRef}
+                            value={draft}
+                            maxLength={140}
+                            onChange={(e) => setDraft(e.target.value)}
+                            placeholder={`Add a comment for @${handle}…`}
+                            rows={3}
+                            style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.06)", color: TEXT, fontSize: 16, lineHeight: 1.35, resize: "none", fontFamily: "inherit" }}
+                        />
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 10 }}>
+                            <button className="ghost" onClick={() => onFinish({ unliked: true, text: null })} style={{ borderRadius: 999 }}>
+                                Skip
+                            </button>
+                            <button className="btn" disabled={!draft.trim()} onClick={() => onFinish({ unliked: true, text: draft.trim() })} style={{ borderRadius: 999, opacity: draft.trim() ? 1 : 0.5 }}>
+                                Post <Icon name="send" size={16} />
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    )
+}
+
+/* ───────────────────────── Ending: two windows, nothing more ───────────────────────── */
+
+function Ending(props: { step: number; onFeed: () => void; reduce: boolean }) {
+    const { step, onFeed } = props
+    return (
+        <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+            <AnimatePresence>
+                {step >= 1 && (
+                    <motion.div key="close" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9 }} style={{ position: "absolute", left: 0, right: 0, bottom: "12%", textAlign: "center", padding: "0 20px" }}>
+                        <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
+                            Everyone is more than the moment you saw.
+                        </p>
+                        <button onClick={onFeed} className="btn" style={{ marginTop: 22, pointerEvents: "auto" }}>
+                            Back to the feed <Icon name="next" size={18} />
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    )
+}
+
 /* ───────────────────────── Top bar ───────────────────────── */
 
 function TopBar(props: { progress: number; onBack: () => void; onSkip?: () => void }) {
     const { progress, onBack, onSkip } = props
-    const names = ["Watch", "Live", "Watched", "Reflect"]
+    const names = ["Watch", "Live", "Watched", "Your side"]
     const box: CSSProperties = { width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", color: TEXT, background: "rgba(12,12,16,.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,.12)", pointerEvents: "auto" }
     return (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", pointerEvents: "none" }}>
@@ -2249,23 +2692,6 @@ function WatchedOverlay(props: { step: number; picks: Option[]; liked: Comment |
                     ))}
             </AnimatePresence>
 
-            {/* the last window to light up is yours */}
-            <AnimatePresence>
-                {step >= 4 && (
-                    <motion.div key="yours" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduce ? 0 : 1.4, duration: 0.8 }} style={{ position: "absolute", left: 0, right: 0, bottom: "12%", textAlign: "center", padding: "0 20px" }}>
-                        <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
-                            One of those likes was yours.
-                        </p>
-                        {liked && (
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 14, padding: "7px 14px", borderRadius: 999, background: BLUE, color: "#fff", fontSize: 15, fontWeight: 600, boxShadow: `0 0 30px ${BLUE}` }}>
-                                <Icon name="heart" size={15} fill />
-                                {liked.text}
-                            </span>
-                        )}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
             {step >= 5 && (
                 <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onClick={onNext} aria-label="Continue" className="btn" style={{ position: "absolute", left: "50%", x: "-50%", bottom: 28, zIndex: 12, pointerEvents: "auto", width: 56, padding: 0, borderRadius: 99 }}>
                     <Icon name="next" size={20} />
@@ -2275,50 +2701,7 @@ function WatchedOverlay(props: { step: number; picks: Option[]; liked: Comment |
     )
 }
 
-/* ───────────────────────── Epilogue: your words arrive ───────────────────────── */
 
-function Epilogue(props: { step: number; comment: string; kept: boolean; reduce: boolean; onFeed: () => void }) {
-    const { step, comment, kept, reduce, onFeed } = props
-    return (
-        <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-            <AnimatePresence>
-                {step >= 1 && (
-                    <motion.div
-                        key="reply"
-                        initial={{ y: reduce ? 0 : -30, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: reduce ? 0 : 1.2, type: "spring", stiffness: 240, damping: 24 }}
-                        className="glass"
-                        style={{ position: "absolute", top: "14%", left: "50%", x: "-50%", width: "min(400px, calc(100% - 32px))", display: "flex", gap: 12, padding: 12, borderRadius: 20, background: "rgba(28,30,38,.88)" }}
-                    >
-                        <span style={{ width: 40, height: 40, borderRadius: 10, background: BLUE, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                            <Bitmap map={EYE} size={24} color="#fff" />
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#a8abb6" }}>
-                                <span>@room017 · new reply</span>
-                                <span>now</span>
-                            </span>
-                            <span style={{ display: "block", fontSize: 15, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>{comment}</span>
-                        </span>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-            <AnimatePresence>
-                {step >= 3 && (
-                    <motion.div key="close" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9 }} style={{ position: "absolute", left: 0, right: 0, bottom: "10%", textAlign: "center", padding: "0 20px" }}>
-                        <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
-                            {kept ? "Words stay longer than the moment." : "Everyone is more than the moment you saw."}
-                        </p>
-                        <button onClick={onFeed} className="btn" style={{ marginTop: 22, pointerEvents: "auto" }}>
-                            Back to the feed <Icon name="next" size={18} />
-                        </button>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    )
-}
 
 /* ───────────────────────── HUD ───────────────────────── */
 
@@ -2481,160 +2864,12 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
     )
 }
 
-/* ───────────────────────── Reveal ───────────────────────── */
 
-function Reveal(props: { caption: string; handle: string; liked: Comment | null; visited: ObjId[]; picks: Option[]; onNext: () => void; reduce: boolean }) {
-    const { caption, handle, liked, visited, picks, onNext, reduce } = props
-    const [step, setStep] = useState(reduce ? 3 : 0)
-    useEffect(() => {
-        if (reduce) return
-        const ts = [700, 2000, 3200].map((ms, i) => window.setTimeout(() => setStep(i + 1), ms))
-        return () => ts.forEach((t) => window.clearTimeout(t))
-    }, [reduce])
-    const seen = (Object.keys(OBJECTS) as ObjId[]).filter((o) => visited.includes(o) || o === liked?.evidence)
-    const story = [...seen.map((o) => OBJECTS[o].seen), ...picks.map((p) => p.out)].join(" ")
 
-    return (
-        <div className="scroll" onClick={() => step < 3 && setStep(3)} style={{ position: "absolute", inset: 0, background: NIGHT }}>
-            <div style={{ minHeight: "100%", display: "flex", flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 360px", minHeight: 460, display: "grid", placeItems: "center", padding: "84px 24px 48px", position: "relative", background: "radial-gradient(circle at 50% 55%, rgba(255,184,103,.22), transparent 60%)" }}>
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ height: "min(68vh, 560px)", aspectRatio: "260 / 400" }}>
-                        <TextFigure text={story} fg={PAPER} ink="#3a2a1e" label={`What only you saw: ${story}`} style={{ width: "100%", height: "100%" }} />
-                    </motion.div>
-                    <span className="px" style={{ position: "absolute", left: 24, bottom: 18, fontSize: 19, color: AMBER, textTransform: "uppercase" }}>
-                        [ What you saw ]
-                    </span>
-                </div>
 
-                <div style={{ flex: "1 1 360px", padding: "84px clamp(20px, 5vw, 64px) 96px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 22, borderLeft: "1px solid rgba(255,255,255,.06)" }}>
-                    <motion.h1 initial={{ opacity: 0 }} animate={{ opacity: step >= 1 ? 1 : 0 }} transition={{ duration: 0.01 }} className="px" style={{ fontSize: "clamp(64px, 9vw, 120px)", fontWeight: 400, lineHeight: 0.82, margin: 0, textTransform: "uppercase" }}>
-                        You were both.
-                    </motion.h1>
-                    <motion.p initial={{ opacity: 0 }} animate={{ opacity: step >= 2 ? 1 : 0 }} className="serif" style={{ fontSize: "clamp(26px, 3vw, 34px)", fontStyle: "italic", lineHeight: 1.1, margin: 0, color: "#d8d2c8" }}>
-                        The one watching. And the one being watched.
-                    </motion.p>
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: step >= 3 ? 1 : 0 }} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                        <Win title={`@${handle}`} style={{ maxWidth: 420 }}>
-                            <p style={{ margin: "0 0 10px", fontWeight: 700, fontSize: 16 }}>{caption}</p>
-                            {liked && (
-                                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: BLUE, color: "#fff", padding: "8px 10px" }}>
-                                    <span style={{ display: "grid", paddingTop: 2 }}>
-                                        <Icon name="heart" size={16} fill />
-                                    </span>
-                                    <span style={{ fontSize: 15, fontWeight: 600 }}>{liked.text}</span>
-                                </div>
-                            )}
-                        </Win>
-                        <div>
-                            <div className="px" style={{ fontSize: 19, opacity: 0.6, marginBottom: 6 }}>
-                                [ THEY SAW ]
-                            </div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                                {picks.map((p) => (
-                                    <span key={p.id} className="px" style={{ fontSize: 19, padding: "0 8px", border: "1px solid rgba(243,237,228,.5)", borderRadius: 4 }}>
-                                        {p.head}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                        <div>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    onNext()
-                                }}
-                                className="btn"
-                            >
-                                Back to the comment you liked <Icon name="next" size={18} />
-                            </button>
-                        </div>
-                    </motion.div>
-                    <p className="px" style={{ margin: "8px 0 0", fontSize: 18, opacity: 0.55, textTransform: "uppercase" }}>
-                        Everyone has an opinion. Until they’re the one being watched.
-                    </p>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-/* ───────────────────────── Reflect ───────────────────────── */
-
-function Reflect(props: { phase: Phase; liked: Comment | null; draft: string; setDraft: (s: string) => void; onKeep: () => void; onRewrite: () => void; onPost: () => void }) {
-    const { phase, liked, draft, setDraft, onKeep, onRewrite, onPost } = props
-    const taRef = useRef<HTMLTextAreaElement>(null)
-    useEffect(() => {
-        if (phase === "rewrite") taRef.current?.focus()
-    }, [phase])
-    return (
-        <div className="scroll" style={{ position: "absolute", inset: 0 }}>
-            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-                <div className="grain" />
-            </div>
-            <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "84px 20px 40px", position: "relative" }}>
-                <div style={{ width: "min(580px, 100%)" }}>
-                    {phase === "reflect" ? (
-                        <>
-                            <h2 className="px" style={{ fontSize: "clamp(64px, 10vw, 112px)", fontWeight: 400, lineHeight: 0.85, margin: "0 0 26px", textTransform: "uppercase" }}>
-                                Still agree?
-                            </h2>
-                            <Win title="♥ You liked this">
-                                <p className="serif" style={{ margin: "0 0 18px", fontSize: 32, fontStyle: "italic", lineHeight: 1.1 }}>
-                                    “{liked?.text}”
-                                </p>
-                                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                                    <button className="btn" onClick={onRewrite}>
-                                        Rewrite it
-                                    </button>
-                                    <button className="ghost ink" onClick={onKeep}>
-                                        Keep it
-                                    </button>
-                                </div>
-                            </Win>
-                        </>
-                    ) : (
-                        <>
-                            <div className="serif" aria-hidden="true" style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", fontStyle: "italic", fontSize: 30, marginBottom: 20 }}>
-                                <span>is it true?</span>
-                                <span style={{ color: BLUE_GLOW, transform: "translateY(-10px)" }}>is it kind?</span>
-                                <span>is it necessary?</span>
-                            </div>
-                            <Win title="New comment">
-                                <label htmlFor="tos-draft" style={srOnly}>
-                                    Rewrite your comment. Is it true, kind, necessary?
-                                </label>
-                                <textarea
-                                    id="tos-draft"
-                                    ref={taRef}
-                                    value={draft}
-                                    maxLength={140}
-                                    onChange={(e) => setDraft(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) {
-                                            e.preventDefault()
-                                            onPost()
-                                        }
-                                    }}
-                                    rows={3}
-                                    style={{ width: "100%", padding: "14px 16px", border: `2px solid ${INK}`, background: "#fff", fontSize: 20, lineHeight: 1.35, resize: "none", fontFamily: "inherit", color: INK }}
-                                />
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-                                    <span className="px" style={{ fontSize: 20, color: "#5f5f66" }}>{draft.length}/140</span>
-                                    <button className="btn" onClick={onPost}>
-                                        Post <Icon name="send" size={16} />
-                                    </button>
-                                </div>
-                            </Win>
-                        </>
-                    )}
-                </div>
-            </div>
-        </div>
-    )
-}
 
 addPropertyControls(TheOtherSide, {
     storyHandle: { type: ControlType.String, title: "Handle", defaultValue: "room017" },
     caption: { type: ControlType.String, title: "Caption", defaultValue: "dropped out at 20 lol 💀 #college" },
-    startAt: { type: ControlType.Enum, title: "Start at", options: ["intro", "feed", "pov", "room"], optionTitles: ["Intro", "Feed", "Phone POV", "Room"], defaultValue: "intro", description: "Preview only. Keep on Intro for the live site." },
+    startAt: { type: ControlType.Enum, title: "Start at", options: ["intro", "profile", "feed", "pov", "room", "yourpost", "yourmove"], optionTitles: ["Intro", "Profile", "Feed", "Phone POV", "Room", "Your post", "Your move"], defaultValue: "intro", description: "Preview only. Keep on Intro for the live site." },
 })
