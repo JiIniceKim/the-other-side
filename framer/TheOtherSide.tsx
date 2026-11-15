@@ -446,6 +446,7 @@ const CSS = `
 .tos .act-bob{animation:tosBob 1.1s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-sway{animation:tosSway 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-nod{animation:tosNod 1.6s ease-in-out infinite;transform-box:fill-box}
+@keyframes tosPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.25)}100%{opacity:1;transform:scale(1)}}
 @keyframes tosDust{0%{transform:translate(0,0);opacity:0}15%{opacity:.8}100%{transform:translate(30px,-120px);opacity:0}}
 .tos .blink{animation:tosBlink 1.8s ease-in-out infinite}
 .tos .buzz{animation:tosBuzz .12s linear infinite}
@@ -1025,6 +1026,7 @@ export default function TheOtherSide(props: Props) {
 
     /* ── intro: lives behind windows → everyone picks up their phone → the post lands ── */
     const [lensPos, setLensPos] = useState({ x: 0.5, y: 0.46 })
+    const [loading, setLoading] = useState(startAt === "intro")
     const [crowdLit, setCrowdLit] = useState(0)
     const beginIntro = () => {
         if (introStep !== 0) return
@@ -1263,6 +1265,8 @@ export default function TheOtherSide(props: Props) {
                 <TopBar progress={progress} onBack={toFeed} onSkip={phase === "transit" ? () => setPhase("room") : phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : undefined} />
             )}
 
+            <AnimatePresence>{loading && phase === "intro" && <Loader onDone={() => setLoading(false)} reduce={reduce} />}</AnimatePresence>
+
             <AnimatePresence mode="wait" initial={false}>
                 {phase === "intro" && (
                     <motion.div key="intro" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
@@ -1375,6 +1379,113 @@ export default function TheOtherSide(props: Props) {
                 )}
             </AnimatePresence>
         </div>
+    )
+}
+
+/* ───────────────────────── Loader: a hand, a phone, in dots ───────────────────────── */
+
+const LD_COLS = 30
+const LD_ROWS = 36
+const LOADER_CELLS = (() => {
+    const inRot = (x: number, y: number, cx: number, cy: number, w: number, h: number, deg: number) => {
+        const a = (-deg * Math.PI) / 180
+        const dx = x - cx
+        const dy = y - cy
+        const rx = dx * Math.cos(a) - dy * Math.sin(a)
+        const ry = dx * Math.sin(a) + dy * Math.cos(a)
+        return Math.abs(rx) <= w / 2 && Math.abs(ry) <= h / 2
+    }
+    const inEl = (x: number, y: number, cx: number, cy: number, rx: number, ry: number, deg = 0) => {
+        const a = (-deg * Math.PI) / 180
+        const dx = x - cx
+        const dy = y - cy
+        const ux = dx * Math.cos(a) - dy * Math.sin(a)
+        const uy = dx * Math.sin(a) + dy * Math.cos(a)
+        return (ux * ux) / (rx * rx) + (uy * uy) / (ry * ry) <= 1
+    }
+    const out: { x: number; y: number; t: "hand" | "phone" | "screen"; d: number }[] = []
+    for (let y = 0; y < LD_ROWS; y++)
+        for (let x = 0; x < LD_COLS; x++) {
+            const px = x + 0.5
+            const py = y + 0.5
+            const phone = inRot(px, py, 15, 13, 10, 18, -16)
+            const screen = inRot(px, py, 15, 13, 7.4, 14, -16)
+            const hand =
+                inEl(px, py, 17, 25, 8.5, 6.5, -10) ||
+                inEl(px, py, 9.5, 20, 2.6, 5.6, -28) ||
+                inEl(px, py, 22, 11, 2.8, 1.7, -16) ||
+                inEl(px, py, 23, 14.5, 2.8, 1.7, -16) ||
+                inEl(px, py, 23.4, 18, 2.8, 1.7, -16) ||
+                (px > 13 && px < 25 && py > 28 && py < LD_ROWS)
+            const t = screen ? "screen" : phone ? "phone" : hand ? "hand" : null
+            if (!t) continue
+            if (t === "screen" && hash(x, y, 11) > 0.42) continue
+            out.push({ x, y, t, d: (y / LD_ROWS) * 0.7 + hash(x, y, 12) * 0.5 })
+        }
+    return out
+})()
+
+function Loader(props: { onDone: () => void; reduce: boolean }) {
+    const { onDone, reduce } = props
+    const [pct, setPct] = useState(0)
+    useEffect(() => {
+        const total = reduce ? 600 : 2200
+        const t0 = Date.now()
+        const iv = window.setInterval(() => {
+            const p = Math.min(100, Math.round(((Date.now() - t0) / total) * 100))
+            setPct(p)
+            if (p >= 100) {
+                window.clearInterval(iv)
+                window.setTimeout(onDone, reduce ? 0 : 250)
+            }
+        }, 40)
+        return () => window.clearInterval(iv)
+    }, [])
+    const C = 12
+    return (
+        <motion.div
+            key="loader"
+            initial={false}
+            exit={{ opacity: 0, transition: { duration: 0.5 } }}
+            onClick={onDone}
+            role="progressbar"
+            aria-label="Loading"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            style={{ position: "absolute", inset: 0, zIndex: 40, background: NIGHT, display: "grid", placeItems: "center", cursor: "pointer" }}
+        >
+            <svg aria-hidden="true" width="100%" height="100%" style={{ position: "absolute", inset: 0 }}>
+                <defs>
+                    <pattern id="tosCross" width="12" height="12" patternUnits="userSpaceOnUse">
+                        <path d="M6 4.5v3M4.5 6h3" stroke="rgba(243,237,228,.16)" strokeWidth="1" />
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#tosCross)" />
+            </svg>
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
+                <svg viewBox={`0 0 ${LD_COLS * C} ${LD_ROWS * C}`} style={{ width: "min(300px, 60vw)", height: "auto", display: "block" }} aria-hidden="true">
+                    {LOADER_CELLS.map((c, i) => {
+                        const fill = c.t === "hand" ? "#5b6378" : c.t === "screen" ? "#dfe3ff" : BLUE_GLOW
+                        const delay = c.t === "hand" ? c.d * 0.5 : 0.45 + c.d
+                        return (
+                            <circle
+                                key={i}
+                                cx={c.x * C + C / 2}
+                                cy={c.y * C + C / 2}
+                                r={c.t === "hand" ? C * 0.42 : C * 0.4}
+                                fill={fill}
+                                style={reduce ? undefined : { opacity: 0, animation: `tosPop .28s ease-out ${delay.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}
+                            />
+                        )
+                    })}
+                </svg>
+                <div className="px" style={{ display: "flex", gap: 14, alignItems: "baseline", color: TEXT, fontSize: 22, textTransform: "uppercase" }}>
+                    <span>The Other Side</span>
+                    <span style={{ color: BLUE_GLOW, minWidth: 48, textAlign: "right" }}>{pct}%</span>
+                </div>
+            </div>
+        </motion.div>
     )
 }
 
