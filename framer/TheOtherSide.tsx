@@ -1311,7 +1311,7 @@ export default function TheOtherSide(props: Props) {
             <AnimatePresence>{loading && (phase === "profile" || phase === "intro") && <Loader onDone={() => setLoading(false)} reduce={reduce} />}</AnimatePresence>
 
             <AnimatePresence mode="wait" initial={false}>
-                {phase === "profile" && (
+                {phase === "profile" && !loading && (
                     <motion.div key="profile" initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.94 }} transition={{ duration: 0.45 }} style={{ position: "absolute", inset: 0 }}>
                         <div className="phone">
                             <ProfileSetup initial={profile} onDone={onProfileDone} reduce={reduce} />
