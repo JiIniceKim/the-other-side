@@ -426,7 +426,7 @@ const CSS = `
 .tos .rail-btn:hover .ic{transform:scale(1.08)}
 .tos .cmt-heart{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:44px;min-height:44px;justify-content:center;color:#8d8f99;font-size:11px;font-weight:600}
 .tos .cmt-heart:hover{color:${BLUE_GLOW}}
-.tos .hot{position:absolute;transform:translate(-50%,-50%);width:58px;height:58px;display:grid;place-items:center}
+.tos .hot{position:absolute;width:58px;height:58px;display:grid;place-items:center}
 .tos .hot .ring{position:absolute;inset:16px;border-radius:50%;border:1.5px solid rgba(255,240,220,.75);transition:inset .2s ease,border-color .2s}
 .tos .hot .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,240,220,.95);box-shadow:0 0 10px rgba(255,210,150,.9)}
 .tos .hot.seen .ring{border-color:rgba(255,240,220,.28)}
@@ -446,14 +446,15 @@ const CSS = `
 .tos .act-bob{animation:tosBob 1.1s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-sway{animation:tosSway 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-nod{animation:tosNod 1.6s ease-in-out infinite;transform-box:fill-box}
-@keyframes tosBlink2{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.08)}}
-.tos .ld-blink{transform-box:fill-box;transform-origin:50% 55%;animation:tosBlink2 .26s ease-in-out 1.75s 1}
+@keyframes tosOpen{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}
+@keyframes tosEyeBlink{0%,90%,100%{transform:scaleY(1)}94%{transform:scaleY(.06)}}
 @keyframes tosPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.25)}100%{opacity:1;transform:scale(1)}}
 @keyframes tosDust{0%{transform:translate(0,0);opacity:0}15%{opacity:.8}100%{transform:translate(30px,-120px);opacity:0}}
 .tos .blink{animation:tosBlink 1.8s ease-in-out infinite}
 .tos .buzz{animation:tosBuzz .12s linear infinite}
 .tos .dust{position:absolute;width:3px;height:3px;border-radius:50%;background:#ffe2bc;box-shadow:0 0 6px #ffcf9a;animation:tosDust 9s linear infinite}
 .tos .phone{position:absolute;left:50%;top:50%;width:min(400px,92vw);height:min(840px,94%);transform:translate(-50%,-50%);border-radius:46px;border:10px solid #07080b;background:${NIGHT};overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 0 120px rgba(51,70,255,.35),0 40px 80px rgba(0,0,0,.6)}
+@media (max-width:700px){.tos .clear-badge{bottom:72px !important}}
 @media (max-width:520px){.tos .phone{width:100%;height:100%;border-radius:0;border:0}}
 @media (prefers-reduced-motion: reduce){.tos .hot.target .ring,.tos .blink,.tos .buzz,.tos .dust,.tos .act-bob,.tos .act-sway,.tos .act-nod{animation:none}}
 `
@@ -983,7 +984,8 @@ export default function TheOtherSide(props: Props) {
     const [outcome, setOutcome] = useState<Option | null>(null)
     const [socratic, setSocratic] = useState<string | null>(null)
     const [hint, setHint] = useState<ObjId | null>(null)
-    const [ready, setReady] = useState(false)
+    const [roomStage, setRoomStage] = useState(0) // 0 inner thought · 1 messages pour in · 2 the boss texts
+    const [unlocked, setUnlocked] = useState<ObjId[]>([])
     const [newComment, setNewComment] = useState<string | null>(null)
     const [draft, setDraft] = useState("")
     const [done, setDone] = useState(false)
@@ -1008,7 +1010,11 @@ export default function TheOtherSide(props: Props) {
     /* inner monologue: what the student is thinking, and where to look next */
     const guideInfo = ((): { obj: ObjId | null; text: string } | null => {
         if (phase !== "room" || beat >= 3) return null
-        if (beat === 0) return ready ? { obj: "phone", text: "Work again…? I should answer." } : { obj: null, text: "Rent’s due Friday. So is the exam." }
+        if (beat === 0) {
+            if (roomStage === 0) return { obj: null, text: "Rent’s due Friday. So is the exam." }
+            if (roomStage === 1) return null
+            return { obj: "phone", text: "Work again…? I should answer." }
+        }
         if (beat === 1) {
             const ev = likedComment?.evidence
             if (ev && ev !== "bills" && !visited.includes(ev)) return { obj: ev, text: EVIDENCE_THOUGHT[ev] }
@@ -1028,7 +1034,8 @@ export default function TheOtherSide(props: Props) {
         setOutcome(null)
         setSocratic(null)
         setHint(null)
-        setReady(false)
+        setRoomStage(0)
+        setUnlocked([])
         setWatchStep(0)
         setWatchers(0)
     }, [])
@@ -1089,14 +1096,18 @@ export default function TheOtherSide(props: Props) {
     }
 
     /* ── room ── */
+    // ① inner thought alone → ② the phone fills with messages → ③ the boss
     useEffect(() => {
-        if (phase !== "room" || ready) return
-        const t = window.setTimeout(() => setReady(true), reduce ? 600 : 4800)
+        if (phase !== "room" || beat !== 0 || roomStage >= 2) return
+        const t = window.setTimeout(() => setRoomStage((n) => n + 1), roomStage === 0 ? (reduce ? 400 : 3000) : reduce ? 900 : 4900)
         return () => window.clearTimeout(t)
-    }, [phase, ready])
+    }, [phase, beat, roomStage, reduce])
+    // an object only becomes clickable after a thought has pointed at it
     useEffect(() => {
-        if (phase === "room" && visited.length > 0 && !ready) setReady(true)
-    }, [visited, phase, ready])
+        if (phase !== "room" || !target || unlocked.includes(target)) return
+        const t = window.setTimeout(() => setUnlocked((u) => (u.includes(target) ? u : [...u, target])), reduce ? 0 : 1100)
+        return () => window.clearTimeout(t)
+    }, [phase, target, unlocked, reduce])
     useEffect(() => {
         if (phase !== "room" || open || outcome) return
         setHint(null)
@@ -1319,8 +1330,8 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "room" && (
                     <motion.div key="room" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.7 }} style={{ position: "absolute", inset: 0 }}>
-                        <Room beat={beat} visited={visited} target={target} hint={hint} onOpen={openObj} reduce={reduce} flash={flash} pops={beat === 0 && !open && picks.length === 0} />
-                        <Hud stats={stats} clock={CLOCK[beat]} />
+                        <Room beat={beat} visited={visited} target={target} hint={hint} onOpen={openObj} reduce={reduce} flash={flash} pops={roomStage >= 1 && beat === 0 && !open && picks.length === 0} unlocked={unlocked} />
+                        <Hud stats={stats} clock={CLOCK[beat]} reduce={reduce} />
                         <ObjectCard open={open} beat={beat} stats={stats} outcome={outcome} onChoose={choose} onClose={() => setOpen(null)} onNext={afterOutcome} reduce={reduce} />
                         <AnimatePresence mode="wait">
                             {guideInfo && !open && (
@@ -1330,10 +1341,10 @@ export default function TheOtherSide(props: Props) {
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: -6 }}
                                     transition={{ duration: 0.5 }}
-                                    onClick={() => guideInfo.obj && openObj(guideInfo.obj)}
-                                    disabled={!guideInfo.obj}
+                                    onClick={() => guideInfo.obj && unlocked.includes(guideInfo.obj) && openObj(guideInfo.obj)}
+                                    disabled={!guideInfo.obj || !unlocked.includes(guideInfo.obj)}
                                     aria-label={guideInfo.obj ? `${guideInfo.text} Open ${OBJECTS[guideInfo.obj].label}.` : guideInfo.text}
-                                    className="serif"
+                                    className="serif clear-badge"
                                     style={{ position: "absolute", left: "50%", bottom: 26, x: "-50%", zIndex: 6, maxWidth: "calc(100% - 32px)", padding: "8px 18px", borderRadius: 999, background: "rgba(12,10,12,.55)", backdropFilter: "blur(6px)", color: TEXT, fontSize: "clamp(20px, 2.4vw, 28px)", fontStyle: "italic", lineHeight: 1.2, textShadow: "0 2px 20px rgba(0,0,0,.8)", display: "flex", alignItems: "center", gap: 10, cursor: guideInfo.obj ? "pointer" : "default" }}
                                 >
                                     <span aria-hidden="true" style={{ display: "flex", gap: 3, opacity: 0.7 }}>
@@ -1341,7 +1352,7 @@ export default function TheOtherSide(props: Props) {
                                         <span style={{ width: 7, height: 7, borderRadius: 9, background: TEXT }} />
                                     </span>
                                     {guideInfo.text}
-                                    {guideInfo.obj && (
+                                    {guideInfo.obj && unlocked.includes(guideInfo.obj) && (
                                         <span className="px" style={{ fontStyle: "normal", fontSize: 17, padding: "0 8px", borderRadius: 6, background: BLUE, color: "#fff", textTransform: "uppercase" }}>
                                             {OBJECTS[guideInfo.obj].label}
                                         </span>
@@ -1393,118 +1404,127 @@ export default function TheOtherSide(props: Props) {
 
 /* ───────────────────────── Loader: a hand, a phone, in dots ───────────────────────── */
 
-/* traced from a cross-stitch pattern of two eyes (100 × 25 cells) */
-const EYES_MAP = [
-    "..............##########...................................................................#########",
-    "........######################.........................................................############.",
-    ".....############################....................................................###########....",
-    ".########.......###################..............................................############.......",
-    "......................#################.........................................##########..........",
-    ".........................###############....................................############............",
-    ".............................##############................................##########...............",
-    ".................................###############.........................#########..................",
-    ".......................................##########......................#######......................",
-    ".........................................#########.....................####.........................",
-    "..................#########.....................##.........................##################.......",
-    ".............#####################.......................................########.############......",
-    "...........################.#######....................................##########.....########......",
-    ".........##################.....#####.................................#######.###......########.....",
-    ".......##########.######.##.......#####..............................#..#########......#########....",
-    "......###########.#########........#####............................###.#########......########.....",
-    "....#########...#..########........................................##.#..#######.......####.........",
-    ".....########...#..#######.........................................#...#..#####.......#####.........",
-    ".....#########...#...####.........................................##....##.###.......#######........",
-    ".......#########..######..........................................##................#######.........",
-    "........##########................##..............................##......#.......########..........",
-    "........#############..........#######....................................#################.........",
-    ".........##.########################.......................................##############...........",
-    "............##..###############.............................................############............",
-    ".................#.##...#...#...................................................#..#...#............",
-]
-const LD_COLS = 100
-const LD_ROWS = EYES_MAP.length
-const IRIS = [
-    { x: 24, y: 14.5, r: 4.6 },
-    { x: 77, y: 13.5, r: 4.6 },
-]
-const LOADER_CELLS = (() => {
-    const out: { x: number; y: number; t: "brow" | "eye" | "iris" | "glint"; d: number }[] = []
-    EYES_MAP.forEach((row, y) => {
-        for (let x = 0; x < LD_COLS; x++) {
-            const on = row[x] === "#"
-            const iris = IRIS.find((c) => Math.hypot(x - c.x, y - c.y) <= c.r)
-            const glint = !on && IRIS.some((c) => Math.hypot(x - c.x, y - c.y) <= 1.8)
-            if (!on && !glint) continue
-            const t = glint && !on ? "glint" : iris ? "iris" : y < 10 ? "brow" : "eye"
-            out.push({ x, y, t, d: (x / LD_COLS) * 0.6 + hash(x, y, 12) * 0.25 })
-        }
-    })
-    return out
-})()
+/* a wall of eyes: they fill the screen, wander, blink — then all look at you */
+
+const EYE_W = 92
+const EYE_H = 58
 
 function Loader(props: { onDone: () => void; reduce: boolean }) {
     const { onDone, reduce } = props
+    const ref = useRef<HTMLDivElement>(null)
+    const box = useBox(ref)
     const [pct, setPct] = useState(0)
+    const [stare, setStare] = useState(false)
+    const FILL = reduce ? 500 : 2400
+    const HOLD = reduce ? 900 : 2400
+
+    const eyes = useMemo(() => {
+        if (!box.ok) return []
+        const cols = Math.ceil(box.w / EYE_W) + 1
+        const rows = Math.ceil(box.h / EYE_H) + 1
+        const out: { k: number; x: number; y: number; open: number; bd: number; bp: number; s: number }[] = []
+        for (let r = 0; r < rows; r++)
+            for (let c = 0; c < cols; c++) {
+                const k = r * cols + c
+                const x = c * EYE_W + (r % 2 ? EYE_W / 2 : 0) - EYE_W / 4
+                const y = r * EYE_H + EYE_H / 2 - 6
+                const diag = (x / box.w + y / box.h) / 2
+                out.push({ k, x, y, open: Math.max(0, diag) * (FILL / 1000) * 0.85 + hash(r, c, 21) * 0.15, bd: hash(r, c, 22) * 5, bp: 3 + hash(r, c, 23) * 4, s: 0.82 + hash(r, c, 24) * 0.3 })
+            }
+        return out
+    }, [box.ok, box.w, box.h, FILL])
+
+    // each eye wanders on its own
+    const [gaze, setGaze] = useState<Record<number, { x: number; y: number }>>({})
     useEffect(() => {
-        const total = reduce ? 600 : 2200
-        const t0 = Date.now()
+        if (reduce || stare || eyes.length === 0) return
+        const pick = () => {
+            const ang = Math.random() * Math.PI * 2
+            const m = 0.55 + Math.random() * 0.45
+            return { x: Math.cos(ang) * 14 * m, y: Math.sin(ang) * 6 * m }
+        }
+        setGaze(Object.fromEntries(eyes.map((e) => [e.k, pick()])))
         const iv = window.setInterval(() => {
-            const p = Math.min(100, Math.round(((Date.now() - t0) / total) * 100))
+            setGaze((g) => {
+                const n = { ...g }
+                eyes.forEach((e) => {
+                    if (Math.random() < 0.18) n[e.k] = pick()
+                })
+                return n
+            })
+        }, 420)
+        return () => window.clearInterval(iv)
+    }, [eyes.length, stare, reduce])
+
+    useEffect(() => {
+        const t0 = Date.now()
+        let doneT = 0
+        const iv = window.setInterval(() => {
+            const p = Math.min(100, Math.round(((Date.now() - t0) / FILL) * 100))
             setPct(p)
             if (p >= 100) {
                 window.clearInterval(iv)
-                window.setTimeout(onDone, reduce ? 0 : 250)
+                setStare(true)
+                doneT = window.setTimeout(onDone, HOLD)
             }
         }, 40)
-        return () => window.clearInterval(iv)
+        return () => {
+            window.clearInterval(iv)
+            window.clearTimeout(doneT)
+        }
     }, [])
-    const C = 10
+
     return (
         <motion.div
+            ref={ref}
             key="loader"
             initial={false}
-            exit={{ opacity: 0, transition: { duration: 0.5 } }}
+            exit={{ opacity: 0, transition: { duration: 0.6 } }}
             onClick={onDone}
             role="progressbar"
             aria-label="Loading"
             aria-valuenow={pct}
             aria-valuemin={0}
             aria-valuemax={100}
-            style={{ position: "absolute", inset: 0, zIndex: 40, background: NIGHT, display: "grid", placeItems: "center", cursor: "pointer" }}
+            style={{ position: "absolute", inset: 0, zIndex: 40, background: NIGHT, overflow: "hidden", cursor: "pointer" }}
         >
-            <svg aria-hidden="true" width="100%" height="100%" style={{ position: "absolute", inset: 0 }}>
+            <svg aria-hidden="true" width="100%" height="100%" style={{ position: "absolute", inset: 0, display: "block" }}>
                 <defs>
-                    <pattern id="tosCross" width="12" height="12" patternUnits="userSpaceOnUse">
-                        <path d="M6 4.5v3M4.5 6h3" stroke="rgba(243,237,228,.16)" strokeWidth="1" />
-                    </pattern>
+                    <clipPath id="tosAlmond">
+                        <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" />
+                    </clipPath>
                 </defs>
-                <rect width="100%" height="100%" fill="url(#tosCross)" />
-            </svg>
-            <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
-                <svg viewBox={`0 0 ${LD_COLS * C} ${LD_ROWS * C}`} style={{ width: "min(620px, 86vw)", height: "auto", display: "block", overflow: "visible" }} aria-hidden="true">
-                    {(["brow", "lid"] as const).map((layer) => (
-                        <g key={layer} className={layer === "lid" && !reduce ? "ld-blink" : undefined}>
-                            {LOADER_CELLS.filter((c) => (layer === "brow" ? c.t === "brow" : c.t !== "brow")).map((c, i) => {
-                                const fill = c.t === "iris" ? BLUE_GLOW : c.t === "glint" ? "#ffffff" : "#8b92a6"
-                                const delay = c.t === "iris" || c.t === "glint" ? 0.7 + c.d * 0.6 : c.d
-                                return (
-                                    <circle
-                                        key={i}
-                                        cx={c.x * C + C / 2}
-                                        cy={c.y * C + C / 2}
-                                        r={C * 0.42}
-                                        fill={fill}
-                                        style={reduce ? undefined : { opacity: 0, animation: `tosPop .26s ease-out ${delay.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}
-                                    />
-                                )
-                            })}
+                {eyes.map((e) => {
+                    const g = stare || reduce ? { x: 0, y: 0 } : gaze[e.k] || { x: 0, y: 0 }
+                    return (
+                        <g key={e.k} transform={`translate(${e.x} ${e.y}) scale(${e.s})`}>
+                            <g style={reduce ? undefined : { transform: "scaleY(0)", animation: `tosOpen .35s ease-out ${e.open.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}>
+                                <g
+                                    style={
+                                        reduce || stare
+                                            ? undefined
+                                            : { animation: `tosEyeBlink ${e.bp.toFixed(2)}s ease-in-out ${(e.open + 0.4 + e.bd).toFixed(2)}s infinite`, transformBox: "fill-box", transformOrigin: "center" }
+                                    }
+                                >
+                                    <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="#cfc9be" />
+                                    <g clipPath="url(#tosAlmond)">
+                                        <g style={{ transform: `translate(${g.x}px, ${g.y}px)`, transition: stare ? "transform .45s cubic-bezier(.2,.9,.2,1)" : "transform .5s ease-in-out" }}>
+                                            <circle r={stare ? 13 : 11} fill={stare ? BLUE : BLUE_GLOW} style={{ transition: "r .5s ease, fill .5s ease" }} />
+                                            <circle r={stare ? 6.5 : 5} fill={INK} style={{ transition: "r .5s ease" }} />
+                                            <circle cx={-4} cy={-4} r={2.2} fill="#fff" />
+                                        </g>
+                                    </g>
+                                    <path d="M-36 0 Q0 -27 36 0 Q0 27 -36 0 Z" fill="none" stroke="#0a0b0f" strokeWidth={2.5} />
+                                </g>
+                            </g>
                         </g>
-                    ))}
-                </svg>
-                <div className="px" style={{ display: "flex", gap: 14, alignItems: "baseline", color: TEXT, fontSize: 22, textTransform: "uppercase" }}>
-                    <span>The Other Side</span>
-                    <span style={{ color: BLUE_GLOW, minWidth: 48, textAlign: "right" }}>{pct}%</span>
-                </div>
+                    )
+                })}
+            </svg>
+            <div style={{ position: "absolute", inset: 0, background: stare ? "radial-gradient(ellipse at center, transparent 30%, rgba(5,6,10,.55) 100%)" : "rgba(5,6,10,.25)", transition: "background .6s ease", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", display: "flex", gap: 14, alignItems: "baseline", padding: "6px 16px", background: "rgba(10,11,16,.85)", borderRadius: 8, color: TEXT, fontSize: 24, textTransform: "uppercase", whiteSpace: "nowrap" }} className="px">
+                <span>The Other Side</span>
+                <span style={{ color: BLUE_GLOW, minWidth: 52, textAlign: "right" }}>{pct}%</span>
             </div>
         </motion.div>
     )
@@ -1975,8 +1995,8 @@ function Drawer(props: { open: boolean; onClose: () => void; liked: string | nul
 
 /* ───────────────────────── Room ───────────────────────── */
 
-function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hint: ObjId | null; onOpen: (id: ObjId) => void; reduce: boolean; flash: string | null; pops: boolean }) {
-    const { beat, visited, target, hint, onOpen, reduce, flash, pops } = props
+function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hint: ObjId | null; onOpen: (id: ObjId) => void; reduce: boolean; flash: string | null; pops: boolean; unlocked: ObjId[] }) {
+    const { beat, visited, target, hint, onOpen, reduce, flash, pops, unlocked } = props
     const wrapRef = useRef<HTMLDivElement>(null)
     const box = useBox(wrapRef)
     const [pan, setPan] = useState(0)
@@ -2074,18 +2094,32 @@ function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hin
                         </motion.div>
                     )}
                 </AnimatePresence>
-                {(Object.keys(OBJECTS) as ObjId[]).map((id) => {
-                    const o = OBJECTS[id]
-                    const isTarget = target === id || hint === id
-                    const seen = visited.includes(id) && !isTarget
-                    return (
-                        <button key={id} className={`hot${isTarget ? " target" : ""}${seen ? " seen" : ""}`} onClick={() => !drag.current?.moved && onOpen(id)} aria-label={o.label} style={{ left: `${o.x}%`, top: `${o.y}%`, zIndex: 3 }}>
-                            <span className="ring" />
-                            <span className="dot" />
-                            <span className="lbl">{o.label}</span>
-                        </button>
-                    )
-                })}
+                <AnimatePresence>
+                    {(Object.keys(OBJECTS) as ObjId[])
+                        .filter((id) => unlocked.includes(id) || visited.includes(id))
+                        .map((id) => {
+                            const o = OBJECTS[id]
+                            const isTarget = target === id || hint === id
+                            const seen = visited.includes(id) && !isTarget
+                            return (
+                                <motion.button
+                                    key={id}
+                                    initial={reduce ? false : { opacity: 0, scale: 0.4 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ type: "spring", stiffness: 300, damping: 18 }}
+                                    className={`hot${isTarget ? " target" : ""}${seen ? " seen" : ""}`}
+                                    onClick={() => !drag.current?.moved && onOpen(id)}
+                                    aria-label={o.label}
+                                    style={{ left: `${o.x}%`, top: `${o.y}%`, zIndex: 3, x: "-50%", y: "-50%" }}
+                                >
+                                    <span className="ring" />
+                                    <span className="dot" />
+                                    <span className="lbl">{o.label}</span>
+                                </motion.button>
+                            )
+                        })}
+                </AnimatePresence>
             </motion.div>
             {!reduce &&
                 dust.map((d, i) => <span key={i} className="dust" aria-hidden="true" style={{ left: `${d.l}%`, top: `${d.t}%`, animationDelay: `${d.d}s` }} />)}
@@ -2170,7 +2204,7 @@ function WatchedOverlay(props: { step: number; picks: Option[]; liked: Comment |
             </AnimatePresence>
 
             {step >= 5 && (
-                <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onClick={onNext} aria-label="Continue" className="btn" style={{ position: "absolute", right: 24, bottom: 24, zIndex: 12, pointerEvents: "auto", width: 52, padding: 0, borderRadius: 99 }}>
+                <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onClick={onNext} aria-label="Continue" className="btn" style={{ position: "absolute", left: "50%", x: "-50%", bottom: 28, zIndex: 12, pointerEvents: "auto", width: 56, padding: 0, borderRadius: 99 }}>
                     <Icon name="next" size={20} />
                 </motion.button>
             )}
@@ -2233,26 +2267,65 @@ function Bar(props: { v: number }) {
     )
 }
 
-function Hud(props: { stats: Stats; clock: string }) {
-    const { stats, clock } = props
-    const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(14,11,13,.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,235,210,.12)", borderRadius: 10, padding: "0 12px", fontSize: 21, color: TEXT, height: 36 }
+function Hud(props: { stats: Stats; clock: string; reduce: boolean }) {
+    const { stats, clock, reduce } = props
+    const prev = useRef(stats)
+    const [delta, setDelta] = useState<{ d: Stats; k: number } | null>(null)
+    useEffect(() => {
+        const p = prev.current
+        prev.current = stats
+        const d = { money: stats.money - p.money, energy: stats.energy - p.energy, grade: stats.grade - p.grade }
+        if (!d.money && !d.energy && !d.grade) return
+        setDelta({ d, k: Date.now() })
+        const t = window.setTimeout(() => setDelta(null), 3000)
+        return () => window.clearTimeout(t)
+    }, [stats])
+
+    const chip: CSSProperties = { position: "relative", display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(14,11,13,.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,235,210,.12)", borderRadius: 10, padding: "0 12px", fontSize: 21, color: TEXT, height: 36, transition: "border-color .3s, box-shadow .3s, background .3s" }
+    const UP = "#9DF0B8"
+    const DOWN = "#FF7A66"
+    const hl = (v: number): CSSProperties =>
+        v ? { borderColor: v > 0 ? UP : DOWN, boxShadow: `0 0 0 1px ${v > 0 ? UP : DOWN}, 0 0 24px ${v > 0 ? "rgba(157,240,184,.45)" : "rgba(255,122,102,.55)"}`, background: v > 0 ? "rgba(30,60,40,.7)" : "rgba(70,20,16,.72)" } : {}
+    const stat = (p: { k: keyof Stats; children: ReactNode; title: string }) => {
+        const v = delta ? delta.d[p.k] : 0
+        return (
+            <motion.span key={`${p.k}-${v ? delta?.k : 0}`} animate={v && !reduce ? { scale: [1, 1.16, 1] } : { scale: 1 }} transition={{ duration: 0.5 }} style={{ ...chip, ...hl(v) }} title={p.title}>
+                {p.children}
+                <AnimatePresence>
+                    {v ? (
+                        <motion.span
+                            key={delta?.k}
+                            initial={{ opacity: 0, y: 0 }}
+                            animate={{ opacity: [0, 1, 1, 0], y: [4, 26, 30, 36] }}
+                            transition={{ duration: reduce ? 0.01 : 2.8, times: [0, 0.12, 0.8, 1] }}
+                            style={{ position: "absolute", left: "50%", top: "100%", x: "-50%", fontSize: 26, color: v > 0 ? UP : DOWN, textShadow: "0 2px 12px rgba(0,0,0,.9)", whiteSpace: "nowrap", pointerEvents: "none" }}
+                        >
+                            {v > 0 ? "+" : "−"}
+                            {p.k === "money" ? "$" : ""}
+                            {Math.abs(v)}
+                        </motion.span>
+                    ) : null}
+                </AnimatePresence>
+            </motion.span>
+        )
+    }
     return (
         <div role="status" aria-label={`${clock}. Money $${stats.money} of $640 rent. Energy ${stats.energy}. Grades ${stats.grade}.`} className="px" style={{ position: "absolute", top: 70, left: 16, zIndex: 5, display: "flex", flexWrap: "wrap", gap: 8, maxWidth: "calc(100% - 32px)" }}>
             <span style={chip}>{clock}</span>
-            <span style={chip}>
+            {stat({ k: "money", title: "Money for rent", children: (<>
                 <span style={{ opacity: 0.6 }}>RENT</span>
                 <span style={{ color: stats.money < 640 ? AMBER : TEXT }}>${stats.money}</span>
                 <span style={{ opacity: 0.5 }}>/640</span>
-            </span>
+            </>) })}
             <span style={chip}>
                 <span style={{ opacity: 0.6 }}>EXAM</span> FRI 9AM
             </span>
-            <span style={chip} title="Energy">
-                ⚡ <Bar v={stats.energy} />
-            </span>
-            <span style={chip} title="Grades">
-                A+ <Bar v={stats.grade} />
-            </span>
+            {stat({ k: "energy", title: "Energy", children: (<>
+                <span style={{ opacity: 0.6 }}>ENERGY</span> <Bar v={stats.energy} />
+            </>) })}
+            {stat({ k: "grade", title: "Grades", children: (<>
+                <span style={{ opacity: 0.6 }}>GRADES</span> <Bar v={stats.grade} />
+            </>) })}
         </div>
     )
 }
@@ -2298,11 +2371,11 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
                     key={open + String(beat)}
                     role="dialog"
                     aria-labelledby="tos-card-title"
-                    className="glass"
                     initial={{ opacity: 0, y: reduce ? 0 : 24 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: reduce ? 0 : 16 }}
                     transition={{ duration: 0.25 }}
+                    className="glass clear-badge"
                     style={{ position: "absolute", left: "50%", bottom: 22, x: "-50%", width: "min(560px, calc(100% - 32px))", zIndex: 8, padding: 20, color: TEXT }}
                 >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -2370,7 +2443,7 @@ function Reveal(props: { caption: string; handle: string; liked: Comment | null;
                     </span>
                 </div>
 
-                <div style={{ flex: "1 1 360px", padding: "84px clamp(20px, 5vw, 64px) 40px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 22, borderLeft: "1px solid rgba(255,255,255,.06)" }}>
+                <div style={{ flex: "1 1 360px", padding: "84px clamp(20px, 5vw, 64px) 96px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 22, borderLeft: "1px solid rgba(255,255,255,.06)" }}>
                     <motion.h1 initial={{ opacity: 0 }} animate={{ opacity: step >= 1 ? 1 : 0 }} transition={{ duration: 0.01 }} className="px" style={{ fontSize: "clamp(64px, 9vw, 120px)", fontWeight: 400, lineHeight: 0.82, margin: 0, textTransform: "uppercase" }}>
                         You were both.
                     </motion.h1>
