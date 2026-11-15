@@ -428,6 +428,7 @@ const CSS = `
 .tos .btn:hover{transform:translateY(-1px);box-shadow:0 0 0 1px rgba(255,255,255,.2),0 10px 34px rgba(51,70,255,.6)}
 .tos .ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:10px 20px;border-radius:10px;border:1.5px solid rgba(243,237,228,.55);color:${TEXT};font-weight:600;font-size:15px;transition:background .15s,color .15s}
 .tos .ghost:hover{background:${TEXT};color:${INK}}
+.tos .ghost.choice:hover{background:rgba(110,123,255,.16);color:${TEXT};border-color:${BLUE_GLOW}}
 .tos .ghost.ink{border-color:rgba(12,13,17,.5);color:${INK}}
 .tos .ghost.ink:hover{background:${INK};color:${PAPER}}
 .tos .glass{background:rgba(20,17,20,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,235,210,.14);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -463,6 +464,16 @@ const CSS = `
 .tos .buzz{animation:tosBuzz .12s linear infinite}
 .tos .dust{position:absolute;width:3px;height:3px;border-radius:50%;background:#ffe2bc;box-shadow:0 0 6px #ffcf9a;animation:tosDust 9s linear infinite}
 .tos .phone{position:absolute;left:50%;top:50%;width:min(400px,92vw);height:min(840px,94%);transform:translate(-50%,-50%);border-radius:46px;border:10px solid #07080b;background:${NIGHT};overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 0 120px rgba(51,70,255,.35),0 40px 80px rgba(0,0,0,.6)}
+.tos .entry-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+.tos .entry-kicker{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 26px;color:${BLUE_GLOW};font-size:16px;text-transform:uppercase;letter-spacing:.14em}
+.tos .entry-kicker:before,.tos .entry-kicker:after{content:"";width:40px;height:1px;background:${BLUE_GLOW}}
+.tos .entry-title{margin:0;color:${TEXT};font-family:"Instrument Serif",Georgia,serif;font-size:clamp(46px,7vw,104px);font-weight:400;line-height:.98;letter-spacing:-.03em}
+.tos .entry-lead{max-width:560px;margin:0;color:rgba(243,237,228,.82);font-size:clamp(17px,1.6vw,20px);line-height:1.6}
+.tos .entry-meta{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:22px;color:rgba(243,237,228,.6);font-size:13px}
+/* phone POV: phone on the left, the thought on the right, never on top of each other */
+.tos .pov{--pov-x:32%}
+.tos .pov-thought{left:56%;right:5%;top:40%;text-align:left}
+@media (max-width:760px){.tos .pov{--pov-x:50%}.tos .pov-thought{left:24px;right:24px;top:9%;text-align:center}}
 @media (max-width:700px){.tos .clear-badge{bottom:72px !important}}
 @media (max-width:520px){.tos .phone{width:100%;height:100%;border-radius:0;border:0}}
 @media (prefers-reduced-motion: reduce){.tos .hot.target .ring,.tos .blink,.tos .buzz,.tos .dust,.tos .act-bob,.tos .act-sway,.tos .act-nod{animation:none}}
@@ -1094,7 +1105,7 @@ export default function TheOtherSide(props: Props) {
     }
     useEffect(() => {
         if (phase !== "transit" || startAt === "pov") return
-        const seq = reduce ? [100, 300, 600, 1400, 4600] : [1500, 2300, 4500, 7300, 11200]
+        const seq = reduce ? [100, 300, 600, 1400, 4600] : [1500, 2300, 4500, 8000, 12000]
         const ts = seq.map((ms, i) => window.setTimeout(() => (i < 4 ? setTransitStep(i + 1) : setPhase("room")), ms))
         return () => ts.forEach((t) => window.clearTimeout(t))
     }, [phase, reduce])
@@ -1350,9 +1361,7 @@ export default function TheOtherSide(props: Props) {
             <AnimatePresence mode="wait" initial={false}>
                 {phase === "profile" && !loading && (
                     <motion.div key="profile" initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.94 }} transition={{ duration: 0.45 }} style={{ position: "absolute", inset: 0 }}>
-                        <div className="phone">
-                            <ProfileSetup initial={profile} onDone={onProfileDone} reduce={reduce} />
-                        </div>
+                        <EntryFlow profile={profile} onDone={onProfileDone} reduce={reduce} />
                     </motion.div>
                 )}
 
@@ -1414,7 +1423,7 @@ export default function TheOtherSide(props: Props) {
                                     disabled={!guideInfo.obj || !unlocked.includes(guideInfo.obj)}
                                     aria-label={guideInfo.obj ? `${guideInfo.text} Open ${OBJECTS[guideInfo.obj].label}.` : guideInfo.text}
                                     className="serif clear-badge"
-                                    style={{ position: "absolute", left: "50%", bottom: 26, x: "-50%", zIndex: 6, maxWidth: "calc(100% - 32px)", padding: "8px 18px", borderRadius: 999, background: "rgba(12,10,12,.55)", backdropFilter: "blur(6px)", color: TEXT, fontSize: "clamp(20px, 2.4vw, 28px)", fontStyle: "italic", lineHeight: 1.2, textShadow: "0 2px 20px rgba(0,0,0,.8)", display: "flex", alignItems: "center", gap: 10, cursor: guideInfo.obj ? "pointer" : "default" }}
+                                    style={{ position: "absolute", left: "50%", bottom: 96, x: "-50%", zIndex: 8, maxWidth: "calc(100% - 32px)", padding: "8px 18px", borderRadius: 999, background: "rgba(12,10,12,.55)", backdropFilter: "blur(6px)", color: TEXT, fontSize: "clamp(20px, 2.4vw, 28px)", fontStyle: "italic", lineHeight: 1.2, textShadow: "0 2px 20px rgba(0,0,0,.8)", display: "flex", alignItems: "center", gap: 10, cursor: guideInfo.obj ? "pointer" : "default" }}
                                 >
                                     <span aria-hidden="true" style={{ display: "flex", gap: 3, opacity: 0.7 }}>
                                         <span style={{ width: 5, height: 5, borderRadius: 9, background: TEXT }} />
@@ -1863,21 +1872,17 @@ function PhonePOV(props: { lowered: boolean; liked: Comment | null; handle: stri
         const t = window.setInterval(() => setLikes((n) => n + 3 + Math.floor(Math.random() * 40)), 140)
         return () => window.clearInterval(t)
     }, [lowered])
+    // 1: reading the comments, phone up · 2: phone down, back to real life
     useEffect(() => {
-        if (!lowered) return
-        const a = window.setTimeout(() => setLine(1), reduce ? 0 : 1100)
-        const b = window.setTimeout(() => setLine(2), reduce ? 0 : 2300)
-        return () => {
-            window.clearTimeout(a)
-            window.clearTimeout(b)
-        }
+        const t = window.setTimeout(() => setLine(lowered ? 2 : 1), reduce ? 0 : lowered ? 1200 : 1300)
+        return () => window.clearTimeout(t)
     }, [lowered, reduce])
 
     const skin = "#b9825f"
     const shade = "#8e5c40"
 
     return (
-        <div ref={ref} style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f" }}>
+        <div ref={ref} className="pov" style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f" }}>
             {/* the room behind the phone, out of focus until the phone goes down */}
             <div
                 style={{
@@ -1903,7 +1908,7 @@ function PhonePOV(props: { lowered: boolean; liked: Comment | null; handle: stri
                 initial={still ? false : { y: reduce ? "0%" : "35%", rotate: -3, opacity: 0 }}
                 animate={lowered ? { y: "135%", rotate: -16, opacity: 1 } : { y: "0%", rotate: -3, opacity: 1 }}
                 transition={lowered ? { duration: reduce ? 0.01 : 1.1, ease: [0.5, 0, 0.75, 0] } : { duration: reduce ? 0.01 : 0.9, ease: [0.2, 0.8, 0.2, 1] }}
-                style={{ position: "absolute", left: "50%", bottom: "-4%", x: "-50%", width: "min(330px, 62vw)", aspectRatio: "9 / 18.5" }}
+                style={{ position: "absolute", left: "var(--pov-x, 50%)", bottom: "-4%", x: "-50%", width: "min(330px, 62vw)", aspectRatio: "9 / 18.5" }}
             >
                 <div style={{ position: "absolute", inset: 0, borderRadius: 38, border: "9px solid #0a0a0d", background: NIGHT, overflow: "hidden", boxShadow: `0 0 90px rgba(110,123,255,.35)` }}>
                     <div style={{ padding: "14px 12px", color: TEXT }}>
@@ -1947,12 +1952,14 @@ function PhonePOV(props: { lowered: boolean; liked: Comment | null; handle: stri
             </motion.div>
 
             {/* inner thought */}
-            <div aria-live="polite" style={{ position: "absolute", left: 0, right: 0, top: "34%", textAlign: "center", padding: "0 24px", pointerEvents: "none" }}>
-                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line >= 1 ? 1 : 0, y: line >= 1 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(32px, 4.6vw, 56px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.8)" }}>
-                    You don’t even know me.
+            <div aria-live="polite" style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, pointerEvents: "none" }}>
+                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line === 1 ? 1 : 0, y: line === 1 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif pov-thought" style={{ position: "absolute", margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.2vw, 52px)", lineHeight: 1.08, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.85)" }}>
+                    They’re all watching me fail.
                 </motion.p>
-                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line >= 2 ? 0.8 : 0, y: line >= 2 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif" style={{ margin: "10px 0 0", fontStyle: "italic", fontSize: "clamp(22px, 3vw, 34px)", color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.8)" }}>
-                    …and you’ve already decided.
+                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line >= 2 ? 1 : 0, y: line >= 2 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif" style={{ position: "absolute", left: 24, right: 24, top: "36%", margin: 0, textAlign: "center", fontStyle: "italic", fontSize: "clamp(26px, 3.6vw, 44px)", lineHeight: 1.15, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.8)" }}>
+                    <span style={{ opacity: 0.6 }}>Ugh.</span> No time for this.
+                    <br />
+                    I need to figure out school.
                 </motion.p>
             </div>
         </div>
@@ -2121,6 +2128,65 @@ function YourPostCard(props: { profile: Profile; likedId: CommentId; studentLike
                 ))}
             </div>
         </div>
+    )
+}
+
+/* ───────────────────────── Act 0: the entry — title, then what this is, then the sign-up ───────────────────────── */
+
+function EntryFlow(props: { profile: Profile | null; onDone: (p: Profile) => void; reduce: boolean }) {
+    const { profile, onDone, reduce } = props
+    // 0 the question · 1 what this is + Continue · 2 the sign-up
+    const [step, setStep] = useState(0)
+    useEffect(() => {
+        if (step !== 0) return
+        const t = window.setTimeout(() => setStep(1), reduce ? 1000 : 2600)
+        return () => window.clearTimeout(t)
+    }, [step, reduce])
+    const fade = { initial: { opacity: 0, y: reduce ? 0 : 12 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: reduce ? 0 : -10 } }
+    return (
+        <AnimatePresence mode="wait">
+            {step === 0 && (
+                <motion.div key="title" className="entry-center" {...fade} transition={{ duration: reduce ? 0.2 : 1 }}>
+                    <h1 className="entry-title">
+                        Are you watching?
+                        <br />
+                        Or are you being watched?
+                    </h1>
+                </motion.div>
+            )}
+            {step === 1 && (
+                <motion.div key="lead" className="entry-center" {...fade} transition={{ duration: reduce ? 0.2 : 0.8 }}>
+                    <p className="entry-lead">
+                        A short interactive story about a world where everyone watches and everyone is watched, and how it shapes the way we think, behave, and connect with each other.
+                        <br />
+                        <br />
+                        Pay attention to the details, choose what feels true to you, and take your time. The experience will guide you one step at a time.
+                    </p>
+                    <div className="entry-meta">
+                        <span>About 6 minutes</span>
+                        <span>Fictional composite</span>
+                        <span>Keyboard + touch</span>
+                    </div>
+                    <motion.button
+                        className="btn"
+                        onClick={() => setStep(2)}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.6, delay: reduce ? 0 : 1.2 }}
+                        style={{ marginTop: 34 }}
+                    >
+                        Continue <Icon name="next" size={18} />
+                    </motion.button>
+                </motion.div>
+            )}
+            {step === 2 && (
+                <motion.div key="signup" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }} style={{ position: "absolute", inset: 0 }}>
+                    <div className="phone">
+                        <ProfileSetup initial={profile} onDone={onDone} reduce={reduce} />
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
     )
 }
 
@@ -2404,7 +2470,8 @@ function Ending(props: { step: number; onReplay: () => void; handle: string; red
 
 function TopBar(props: { progress: number; onBack: () => void; onSkip?: () => void }) {
     const { progress, onBack, onSkip } = props
-    const names = ["Watch", "Live", "Watched", "Watching you", "Your side"]
+    // 3 → 4 the watched one starts watching · 4 → 5 the watcher (you) is now the watched
+    const names = ["Judge", "Live the context", "Being watched", "Watching back", "You’re being watched"]
     const box: CSSProperties = { width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", color: TEXT, background: "rgba(12,12,16,.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,.12)", pointerEvents: "auto" }
     return (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", pointerEvents: "none" }}>
@@ -2800,9 +2867,6 @@ function WatchedOverlay({step,picks,liked,watchers,reduce,onNext}: {step:number;
     return <div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
         <ScreenAudience picks={picks} reduce={reduce} />
         <div className="px" style={{position:"absolute",top:80,left:"50%",transform:"translateX(-50%)",fontSize:24,background:NIGHT,padding:"6px 14px",whiteSpace:"nowrap"}}>LIVE · {fmt(1204331 + watchers * 18240)} WATCHING</div>
-        {step >= 3 && step < 5 && <div style={{position:"absolute",left:"50%",top:126,transform:"translateX(-50%)",display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",width:"min(520px,calc(100% - 32px))",zIndex:6}}>
-            {[{label:"supportive",color:"#9ed7b1"},{label:"critical",color:"#ff9d8e"},{label:"uncertain",color:"#b8c3e8"}].map(tone => <span key={tone.label} style={{padding:"5px 10px",borderRadius:999,border:`1px solid ${tone.color}66`,color:tone.color,background:"rgba(10,12,18,.68)",fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>{tone.label} voices</span>)}
-        </div>}
         {step >= 5 && <button className="btn" onClick={onNext} style={{position:"absolute",bottom:28,left:"50%",transform:"translateX(-50%)",pointerEvents:"auto",zIndex:12}}>Continue <Icon name="next" size={18}/></button>}
     </div>
 }
@@ -2844,11 +2908,7 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
         const t = window.setTimeout(() => firstRef.current?.focus(), 30)
         return () => window.clearTimeout(t)
     }, [open, outcome])
-    useEffect(() => {
-        if (!outcome) return
-        const t = window.setTimeout(onNext, reduce ? 3400 : 2800)
-        return () => window.clearTimeout(t)
-    }, [outcome])
+    // the result stays until they press Continue: no auto-advance
 
     return (
         <AnimatePresence>
@@ -2871,21 +2931,32 @@ function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; out
                     </div>
                     {outcome ? (
                         <div>
-                            <p style={{ margin: "0 0 14px", fontSize: 21, fontWeight: 700, lineHeight: 1.3 }}>{outcome.out}</p>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 10, marginBottom: 14 }}>
+                                <div style={{ padding: 14, borderRadius: 12, background: "rgba(255,184,103,.1)", border: "1px solid rgba(255,184,103,.3)" }}>
+                                    <div className="px" style={{ color: AMBER, fontSize: 15, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 6 }}>What happened</div>
+                                    <div style={{ fontSize: 18, fontWeight: 650, lineHeight: 1.35 }}>{outcome.out}</div>
+                                </div>
+                                <div style={{ padding: 14, borderRadius: 12, background: "rgba(51,70,255,.12)", border: "1px solid rgba(110,123,255,.38)" }}>
+                                    <div className="px" style={{ color: BLUE_GLOW, fontSize: 15, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 6 }}>What strangers see</div>
+                                    <div className="px" style={{ fontSize: 21, lineHeight: 1.12, textTransform: "uppercase" }}>{outcome.head}</div>
+                                </div>
+                            </div>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                                 <Delta d={outcome.d} />
-                                <button ref={firstRef} onClick={onNext} aria-label="Continue" className="btn" style={{ width: 48, padding: 0, borderRadius: 99, flexShrink: 0 }}>
-                                    <Icon name="next" size={18} />
+                                <button ref={firstRef} onClick={onNext} className="btn" style={{ flexShrink: 0 }}>
+                                    Continue <Icon name="next" size={18} />
                                 </button>
                             </div>
                         </div>
                     ) : isBeat ? (
                         <div>
-                            <p style={{ margin: "0 0 16px", fontSize: 22, fontWeight: 700, lineHeight: 1.3 }}>{BEATS[beat].prompt(stats)}</p>
-                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            <p style={{ margin: "0 0 5px", fontSize: 22, fontWeight: 700, lineHeight: 1.3 }}>{BEATS[beat].prompt(stats)}</p>
+                            <p style={{ margin: "0 0 16px", color: "rgba(243,237,228,.62)", fontSize: 13 }}>No perfect answer. Each option changes what you can protect.</p>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
                                 {BEATS[beat].options.map((o, i) => (
-                                    <button key={o.id} ref={i === 0 ? firstRef : undefined} className="ghost" onClick={() => onChoose(o)}>
-                                        {o.label}
+                                    <button key={o.id} ref={i === 0 ? firstRef : undefined} className="ghost choice" onClick={() => onChoose(o)} style={{ minHeight: 74, padding: 12, alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
+                                        <span style={{ fontWeight: 700 }}>{o.label}</span>
+                                        <Delta d={o.d} />
                                     </button>
                                 ))}
                             </div>
