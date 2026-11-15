@@ -1321,7 +1321,7 @@ export default function TheOtherSide(props: Props) {
 
                 {phase === "intro" && (
                     <motion.div key="intro" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
-                        <Intro step={introStep} onBegin={beginIntro} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} onLens={(x, y) => introStep === 0 && setLensPos({ x, y })} />
+                        <Intro step={introStep} onBegin={() => !loading && beginIntro()} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} onLens={(x, y) => introStep === 0 && setLensPos({ x, y })} />
                     </motion.div>
                 )}
 
@@ -1612,13 +1612,12 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
             key="loader"
             initial={false}
             exit={{ opacity: 0, transition: { duration: 1.1, ease: [0.4, 0, 0.2, 1] } }}
-            onClick={onDone}
             role="progressbar"
             aria-label="Loading"
             aria-valuenow={pct}
             aria-valuemin={0}
             aria-valuemax={100}
-            style={{ position: "absolute", inset: 0, zIndex: 40, background: NIGHT, overflow: "hidden", cursor: "pointer" }}
+            style={{ position: "absolute", inset: 0, zIndex: 40, background: NIGHT, overflow: "hidden", cursor: "default", userSelect: "none" }}
         >
             <svg aria-hidden="true" width="100%" height="100%" style={{ position: "absolute", inset: 0, display: "block" }}>
                 <defs>
