@@ -624,9 +624,16 @@ function FacadeArt(props: { lit: Record<string, Lit>; level: Level; reticle?: Sp
                     <stop offset="0" stopColor="#8E98FF" />
                     <stop offset="1" stopColor={BLUE} />
                 </linearGradient>
-                <filter id={blur} x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="22" />
-                </filter>
+                <radialGradient id={`${blur}a`} cx=".5" cy=".5" r=".5">
+                    <stop offset="0" stopColor={AMBER} stopOpacity=".85" />
+                    <stop offset=".45" stopColor={AMBER} stopOpacity=".35" />
+                    <stop offset="1" stopColor={AMBER} stopOpacity="0" />
+                </radialGradient>
+                <radialGradient id={`${blur}b`} cx=".5" cy=".5" r=".5">
+                    <stop offset="0" stopColor={BLUE} stopOpacity=".8" />
+                    <stop offset=".45" stopColor={BLUE} stopOpacity=".3" />
+                    <stop offset="1" stopColor={BLUE} stopOpacity="0" />
+                </radialGradient>
             </defs>
             <rect width={FW} height={FH} fill={`url(#wall${uid})`} />
             {walls}
@@ -636,7 +643,7 @@ function FacadeArt(props: { lit: Record<string, Lit>; level: Level; reticle?: Sp
                     const w = winRect(c, r)
                     const warm = t === "amber" || t === "bright"
                     const g = t === "bright" ? 90 : 40
-                    return <rect key={`g${k}`} x={w.x - g} y={w.y - g} width={w.w + g * 2} height={w.h + g * 2} fill={warm ? AMBER : BLUE} opacity={t === "bright" ? 0.9 : warm ? 0.55 : 0.5} filter={`url(#${blur})`} style={{ transition: "all 1.2s ease" }} />
+                    return <ellipse key={`g${k}`} cx={w.x + w.w / 2} cy={w.y + w.h / 2} rx={w.w / 2 + g * 1.4} ry={w.h / 2 + g * 1.4} fill={`url(#${blur}${warm ? "a" : "b"})`} opacity={t === "bright" ? 1 : warm ? 0.7 : 0.6} />
                 })}
             {Array.from({ length: FR }).flatMap((_, r) =>
                 Array.from({ length: FC }).map((__, c) => {
@@ -1253,7 +1260,7 @@ export default function TheOtherSide(props: Props) {
                     transition={{ duration: 0.8 }}
                     style={{ position: "absolute", inset: 0, filter: phase === "feed" ? "blur(6px) brightness(.55)" : "blur(0px) brightness(1)", transition: "filter .8s ease" }}
                 >
-                    <Facade lit={facade.lit} level={facade.level} focus={facade.focus} duration={reduce ? 0.01 : facade.duration} initialLevel={phase === "watched" ? "inside" : undefined} reticle={facade.reticleAt} lens={phase === "intro" && introStep < 2 ? { ...lensPos, phones: introStep >= 1 } : null} />
+                    <Facade lit={facade.lit} level={facade.level} focus={facade.focus} duration={reduce ? 0.01 : facade.duration} initialLevel={phase === "watched" ? "near" : undefined} reticle={facade.reticleAt} lens={phase === "intro" && introStep < 2 ? { ...lensPos, phones: introStep >= 1 } : null} />
                     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
                         <div className="grain" />
                     </div>
@@ -2388,7 +2395,7 @@ function Reveal(props: { caption: string; handle: string; liked: Comment | null;
                                 }}
                                 className="btn"
                             >
-                                Back to your comment <Icon name="next" size={18} />
+                                Back to the comment you liked <Icon name="next" size={18} />
                             </button>
                         </div>
                     </motion.div>
