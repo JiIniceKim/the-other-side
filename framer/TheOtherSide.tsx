@@ -1,0 +1,2168 @@
+import {
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    useCallback,
+    useId,
+    startTransition,
+    type CSSProperties,
+    type ReactNode,
+    type RefObject,
+    type PointerEvent as RPointerEvent,
+} from "react"
+import { addPropertyControls, ControlType } from "framer"
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion"
+
+/* ───────────────────────── Palette (blue = highlight only) ───────────────────────── */
+
+const BLUE = "#3346FF"
+const BLUE_GLOW = "#6E7BFF"
+const PAPER = "#EDE7DC"
+const INK = "#0C0D11"
+const NIGHT = "#10131A"
+const AMBER = "#FFB867"
+const TEXT = "#F3EDE4"
+
+/* ───────────────────────── Story data ───────────────────────── */
+
+type ObjId = "phone" | "laptop" | "bills" | "calendar" | "door"
+type Stats = { money: number; energy: number; grade: number }
+type Phase = "intro" | "feed" | "transit" | "room" | "watched" | "reveal" | "reflect" | "rewrite" | "epilogue"
+
+interface Comment {
+    id: string
+    handle: string
+    text: string
+    likes: number
+    evidence: ObjId
+}
+
+const COMMENTS: Comment[] = [
+    { id: "c1", handle: "grindset.mike", text: "I would’ve just gotten another job.", likes: 4213, evidence: "laptop" },
+    { id: "c2", handle: "4.0_or_bust", text: "Why didn’t they just study harder?", likes: 3108, evidence: "calendar" },
+    { id: "c3", handle: "lena.k", text: "Imagine wasting an opportunity like that.", likes: 2741, evidence: "bills" },
+    { id: "c4", handle: "justsaying_", text: "Why didn’t they ask for help??", likes: 1906, evidence: "door" },
+]
+
+const OBJECTS: Record<ObjId, { label: string; info: string; seen: string; x: number; y: number }> = {
+    phone: { label: "Phone", info: "Mom: “Proud of you. Don’t worry about us.”", seen: "Mom is struggling too.", x: 55.3, y: 60.6 },
+    laptop: { label: "Computer", info: "Job board: every opening overlaps class.", seen: "No job fits class hours.", x: 67.5, y: 51 },
+    bills: { label: "Bills", info: "Scholarship cut: −$2,400.", seen: "The scholarship was cut.", x: 78.4, y: 60.6 },
+    calendar: { label: "Calendar", info: "31 work hours this week. Exam Fri 9 AM.", seen: "31 work hours a week.", x: 42.5, y: 28.5 },
+    door: { label: "Door", info: "Aid office: closed until Monday.", seen: "Help was closed till Monday.", x: 93.6, y: 52 },
+}
+
+interface Option {
+    id: string
+    outside: string
+    label: string
+    d: Partial<Stats>
+    out: string
+    head: string
+}
+interface Beat {
+    obj: ObjId
+    prompt: (s: Stats) => string
+    options: Option[]
+}
+
+const BEATS: Beat[] = [
+    {
+        obj: "phone",
+        prompt: () => "Boss: “Can you cover tonight? +$90”",
+        options: [
+            { id: "shift", outside: "skipping exams again lol", label: "Take shift", d: { money: 90, energy: -30, grade: -15 }, out: "Rent closer. Notes untouched.", head: "SKIPS STUDYING FOR EXAM" },
+            { id: "study", outside: "must be nice to not need a job", label: "Study", d: { energy: -10, grade: 12 }, out: "Ready for the exam. Rent isn’t.", head: "TURNS DOWN WORK. AGAIN." },
+            { id: "swap", outside: "flaky coworker energy", label: "Ask to swap", d: { money: 45, energy: -20, grade: 4 }, out: "Half a shift. Half ready.", head: "LEAVES COWORKERS SHORT" },
+        ],
+    },
+    {
+        obj: "bills",
+        prompt: () => "Rent $640 · due Friday",
+        options: [
+            { id: "mom", outside: "parents paying for everything 🙄", label: "Call Mom", d: { money: 150, energy: -5 }, out: "She sent it. Her rent is late now.", head: "STILL ASKS PARENTS FOR MONEY" },
+            { id: "shifts", outside: "so school was never the priority", label: "Pick up shifts", d: { money: 240, energy: -35, grade: -15 }, out: "Rent paid. Missed two lectures.", head: "PUTS JOB BEFORE SCHOOL" },
+            { id: "aid", outside: "can’t even pay rent on time", label: "Financial aid", d: { money: 255, energy: -10 }, out: "Grant approved — Monday. Late fee $45.", head: "PAYS RENT LATE" },
+        ],
+    },
+    {
+        obj: "laptop",
+        prompt: (s) => (s.grade < 60 ? "Advisor: “You’re on academic probation.”" : "Advisor: “One more bad week = probation.”"),
+        options: [
+            { id: "stay", outside: "just accept it’s not for you", label: "Stay enrolled", d: { energy: -15, grade: 5 }, out: "Next semester. Same math.", head: "WON’T ADMIT IT’S NOT WORKING" },
+            { id: "leave", outside: "knew they’d quit", label: "Take a leave", d: { energy: 20 }, out: "A pause, not a quit. No one will see that.", head: "DROPS OUT AT 20" },
+        ],
+    },
+]
+
+const CLOCK = ["THU 6:40 PM", "FRI 1:15 AM", "FRI 8:30 AM", "MON 9:00 AM"]
+const SOCRATIC = ["What haven’t you checked?", "Who else does this touch?"]
+const START: Stats = { money: 180, energy: 70, grade: 72 }
+const CROWD = [
+    { h: "anon_88", t: "couldn’t be me" },
+    { h: "kyle.w", t: "skill issue" },
+    { h: "mira", t: "no excuses" },
+    { h: "user4471", t: "main character syndrome" },
+    { h: "jules", t: "ngl that’s on them" },
+    { h: "dev", t: "lol" },
+]
+
+const POV_STREAM = [
+    { h: "grindset.mike", t: "I would’ve just gotten another job.", n: 4213 },
+    { h: "anon_88", t: "couldn’t be me", n: 1204 },
+    { h: "4.0_or_bust", t: "Why didn’t they just study harder?", n: 3108 },
+    { h: "sam.r", t: "college isn’t for everyone tbh", n: 812 },
+    { h: "lena.k", t: "Imagine wasting an opportunity like that.", n: 2741 },
+    { h: "kyle.w", t: "skill issue", n: 960 },
+    { h: "noor", t: "we don’t know their situation…", n: 88 },
+    { h: "justsaying_", t: "Why didn’t they ask for help??", n: 1906 },
+    { h: "mira", t: "no excuses", n: 703 },
+    { h: "user4471", t: "main character syndrome", n: 511 },
+    { h: "dev", t: "lol", n: 342 },
+    { h: "jules", t: "ngl that’s on them", n: 655 },
+]
+
+/* ───────────────────────── Utils ───────────────────────── */
+
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
+
+function hash(i: number, j: number, s: number) {
+    const x = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453
+    return x - Math.floor(x)
+}
+function fmt(n: number) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M"
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K"
+    return String(n)
+}
+function clamp(n: number, a: number, b: number) {
+    return Math.max(a, Math.min(b, n))
+}
+function safeGet(key: string): string | null {
+    try {
+        if (typeof window === "undefined") return null
+        return window.localStorage.getItem(key)
+    } catch {
+        return null
+    }
+}
+function safeSet(key: string, v: string) {
+    try {
+        if (typeof window !== "undefined") window.localStorage.setItem(key, v)
+    } catch {}
+}
+function ding() {
+    try {
+        if (typeof window === "undefined") return
+        const AC = (window as any).AudioContext || (window as any).webkitAudioContext
+        if (!AC) return
+        const ctx = new AC()
+        const t = ctx.currentTime
+        ;[880, 1318].forEach((f, i) => {
+            const o = ctx.createOscillator()
+            const g = ctx.createGain()
+            o.type = "sine"
+            o.frequency.value = f
+            const s = t + i * 0.12
+            g.gain.setValueAtTime(0.0001, s)
+            g.gain.exponentialRampToValueAtTime(0.16, s + 0.02)
+            g.gain.exponentialRampToValueAtTime(0.0001, s + 0.5)
+            o.connect(g)
+            g.connect(ctx.destination)
+            o.start(s)
+            o.stop(s + 0.55)
+        })
+        window.setTimeout(() => ctx.close(), 1200)
+    } catch {}
+}
+
+function useBox(ref: RefObject<HTMLElement>) {
+    const [box, setBox] = useState({ w: 1200, h: 800, ok: false })
+    useIsoLayoutEffect(() => {
+        const el = ref.current
+        if (!el) return
+        setBox({ w: el.clientWidth || 1200, h: el.clientHeight || 800, ok: true })
+        if (typeof ResizeObserver === "undefined") return
+        const ro = new ResizeObserver((entries) => {
+            const r = entries[0].contentRect
+            setBox((b) => (Math.abs(b.w - r.width) < 1 && Math.abs(b.h - r.height) < 1 ? b : { w: r.width, h: r.height, ok: true }))
+        })
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+    return box
+}
+
+const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
+const GRAIN = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")`
+
+/* ───────────────────────── Bitmap marks ───────────────────────── */
+
+function Bitmap(props: { map: string[]; size: number; color: string }) {
+    const { map, size, color } = props
+    const w = map[0].length
+    const h = map.length
+    return (
+        <svg width={size} height={(size * h) / w} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" shapeRendering="crispEdges" style={{ display: "block" }}>
+            {map.flatMap((r, i) => r.split("").map((ch, j) => (ch === "#" ? <rect key={`${i}-${j}`} x={j} y={i} width={1} height={1} fill={color} /> : null)))}
+        </svg>
+    )
+}
+const EYE = ["..#####..", ".#.....#.", "#...#...#", "#..###..#", "#...#...#", ".#.....#.", "..#####.."]
+
+/* ───────────────────────── Pixel figure (reveal) ───────────────────────── */
+
+const FIG = [
+    "........###.........",
+    ".......#####........",
+    ".......######.......",
+    ".......######.......",
+    ".......#####........",
+    "........###.........",
+    "........###.........",
+    ".....#########......",
+    "....###########.....",
+    "...#############....",
+    "...##############...",
+    "...##############...",
+    "..###.#########.##..",
+    "..###.#########.##..",
+    "..###.#########.###.",
+    "..##..#########..##.",
+    "..##..#########..##.",
+    "..##..#########..##.",
+    ".###..#########..##.",
+    ".##...#########..##.",
+    ".##...#########...#.",
+    "......#########.....",
+    "......#########.....",
+    "......####.####.....",
+    "......####.####.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    "......###...###.....",
+    ".....####...####....",
+    ".....####...####....",
+]
+const CELL = 10
+const CELLS = (() => {
+    const out: { i: number; j: number }[] = []
+    FIG.forEach((row, i) => {
+        for (let j = 0; j < 20; j++) if (row[j] === "#") out.push({ i, j })
+    })
+    return out
+})()
+
+function wrapText(text: string, max: number) {
+    const words = text.split(/\s+/)
+    const lines: string[] = []
+    let cur = ""
+    for (const w of words) {
+        if ((cur + " " + w).trim().length > max) {
+            if (cur) lines.push(cur)
+            cur = w
+        } else cur = (cur + " " + w).trim()
+    }
+    if (cur) lines.push(cur)
+    return lines
+}
+
+function TextFigure(props: { text: string; fg: string; ink: string; label: string; style?: CSSProperties }) {
+    const { text, fg, ink, label, style } = props
+    const cid = useId().replace(/[^a-zA-Z0-9]/g, "")
+    const W = 200
+    const H = FIG.length * CELL
+    const lines = useMemo(() => {
+        const base = wrapText(text || "…", 24)
+        const out: string[] = []
+        while (out.length < 27) out.push(...base, "")
+        return out.slice(0, 27)
+    }, [text])
+    return (
+        <svg viewBox={`-30 -20 ${W + 60} ${H + 40}`} role="img" aria-label={label} style={{ display: "block", overflow: "visible", ...style }}>
+            <defs>
+                <clipPath id={`fig${cid}`}>
+                    {CELLS.map((c) => (
+                        <rect key={`${c.i}-${c.j}`} x={c.j * CELL} y={c.i * CELL} width={CELL + 0.5} height={CELL + 0.5} />
+                    ))}
+                </clipPath>
+            </defs>
+            <g fill={fg}>
+                {CELLS.map((c) => (
+                    <rect key={`${c.i}-${c.j}`} x={c.j * CELL} y={c.i * CELL} width={CELL + 0.5} height={CELL + 0.5} />
+                ))}
+            </g>
+            <g clipPath={`url(#fig${cid})`} fill={ink} style={{ fontFamily: "VT323, monospace", fontSize: 14 }}>
+                {lines.map((l, k) => (
+                    <text key={k} x={6} y={14 + k * 13.4}>
+                        {l}
+                    </text>
+                ))}
+            </g>
+        </svg>
+    )
+}
+
+/* ───────────────────────── Icons ───────────────────────── */
+
+function Icon(props: { name: string; size?: number; fill?: boolean }) {
+    const { name, size = 22, fill = false } = props
+    const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true }
+    switch (name) {
+        case "heart":
+            return (
+                <svg {...p} fill={fill ? "currentColor" : "none"}>
+                    <path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z" />
+                </svg>
+            )
+        case "comment":
+            return (
+                <svg {...p}>
+                    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z" />
+                </svg>
+            )
+        case "share":
+            return (
+                <svg {...p}>
+                    <path d="M14 4l7 7-7 7M21 11H10a6 6 0 0 0-6 6v2" />
+                </svg>
+            )
+        case "back":
+            return (
+                <svg {...p}>
+                    <path d="M15 18l-6-6 6-6" />
+                </svg>
+            )
+        case "next":
+            return (
+                <svg {...p}>
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+            )
+        case "x":
+            return (
+                <svg {...p}>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+            )
+        case "replay":
+            return (
+                <svg {...p}>
+                    <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" />
+                </svg>
+            )
+        case "send":
+            return (
+                <svg {...p}>
+                    <path d="m22 2-7 20-4-9-9-4 20-7Z" />
+                </svg>
+            )
+        case "lock":
+            return (
+                <svg {...p}>
+                    <rect x="4" y="11" width="16" height="10" rx="2" />
+                    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                </svg>
+            )
+        case "skip":
+            return (
+                <svg {...p}>
+                    <path d="M5 5l9 7-9 7V5ZM19 5v14" />
+                </svg>
+            )
+        default:
+            return null
+    }
+}
+
+/* ───────────────────────── CSS ───────────────────────── */
+
+const CSS = `
+.tos{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;color:${TEXT};}
+.tos *{box-sizing:border-box}
+.tos button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+.tos button:focus-visible,.tos textarea:focus-visible{outline:3px solid ${BLUE_GLOW};outline-offset:3px}
+.tos .px{font-family:VT323,ui-monospace,Menlo,monospace;letter-spacing:.03em}
+.tos .serif{font-family:"Instrument Serif",Georgia,serif}
+.tos .scroll{overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.tos .scroll::-webkit-scrollbar{display:none}
+.tos .grain{position:absolute;inset:-50%;pointer-events:none;background-image:${GRAIN};opacity:.13;mix-blend-mode:overlay;animation:tosGrain .9s steps(4) infinite}
+@keyframes tosGrain{0%{transform:translate(0,0)}25%{transform:translate(-3%,2%)}50%{transform:translate(2%,-3%)}75%{transform:translate(-2%,-1%)}100%{transform:translate(0,0)}}
+.tos .vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 55% 45%,transparent 45%,rgba(0,0,0,.6) 100%)}
+.tos .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:10px 20px;border-radius:10px;background:${BLUE};color:#fff;font-weight:700;font-size:15px;box-shadow:0 0 0 1px rgba(255,255,255,.1),0 8px 28px rgba(51,70,255,.45);transition:transform .15s,box-shadow .15s}
+.tos .btn:hover{transform:translateY(-1px);box-shadow:0 0 0 1px rgba(255,255,255,.2),0 10px 34px rgba(51,70,255,.6)}
+.tos .ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:10px 20px;border-radius:10px;border:1.5px solid rgba(243,237,228,.55);color:${TEXT};font-weight:600;font-size:15px;transition:background .15s,color .15s}
+.tos .ghost:hover{background:${TEXT};color:${INK}}
+.tos .ghost.ink{border-color:rgba(12,13,17,.5);color:${INK}}
+.tos .ghost.ink:hover{background:${INK};color:${PAPER}}
+.tos .glass{background:rgba(20,17,20,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,235,210,.14);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.tos .rail-btn{display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;font-size:12px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.tos .rail-btn .ic{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.35);backdrop-filter:blur(6px);transition:transform .15s}
+.tos .rail-btn:hover .ic{transform:scale(1.08)}
+.tos .cmt-heart{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:44px;min-height:44px;justify-content:center;color:#8d8f99;font-size:11px;font-weight:600}
+.tos .cmt-heart:hover{color:${BLUE_GLOW}}
+.tos .hot{position:absolute;transform:translate(-50%,-50%);width:58px;height:58px;display:grid;place-items:center}
+.tos .hot .ring{position:absolute;inset:16px;border-radius:50%;border:1.5px solid rgba(255,240,220,.75);transition:inset .2s ease,border-color .2s}
+.tos .hot .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,240,220,.95);box-shadow:0 0 10px rgba(255,210,150,.9)}
+.tos .hot.seen .ring{border-color:rgba(255,240,220,.28)}
+.tos .hot.seen .dot{background:rgba(255,240,220,.4);box-shadow:none}
+.tos .hot:hover .ring,.tos .hot:focus-visible .ring{inset:9px}
+.tos .hot.target .ring{border:2px solid ${BLUE_GLOW};box-shadow:0 0 16px ${BLUE};animation:tosPulse 1.4s ease-out infinite}
+.tos .hot.target .dot{background:#fff;box-shadow:0 0 12px ${BLUE_GLOW}}
+.tos .hot .lbl{position:absolute;top:58px;left:50%;transform:translateX(-50%) translateY(-3px);white-space:nowrap;padding:2px 10px;border-radius:6px;background:rgba(12,10,12,.82);color:${TEXT};font-family:VT323,monospace;font-size:19px;text-transform:uppercase;letter-spacing:.05em;opacity:0;pointer-events:none;transition:all .18s}
+.tos .hot.target .lbl{background:${BLUE};color:#fff}
+.tos .hot:hover .lbl,.tos .hot:focus-visible .lbl,.tos .hot.target .lbl{opacity:1;transform:translateX(-50%) translateY(0)}
+@keyframes tosPulse{0%{box-shadow:0 0 0 0 rgba(110,123,255,.8)}100%{box-shadow:0 0 0 20px rgba(110,123,255,0)}}
+@keyframes tosBlink{0%,55%{opacity:1}56%,100%{opacity:.15}}
+@keyframes tosBuzz{0%,100%{transform:translate(0,0)}25%{transform:translate(-2px,0)}75%{transform:translate(2px,0)}}
+@keyframes tosDust{0%{transform:translate(0,0);opacity:0}15%{opacity:.8}100%{transform:translate(30px,-120px);opacity:0}}
+.tos .blink{animation:tosBlink 1.1s steps(1) infinite}
+.tos .buzz{animation:tosBuzz .12s linear infinite}
+.tos .dust{position:absolute;width:3px;height:3px;border-radius:50%;background:#ffe2bc;box-shadow:0 0 6px #ffcf9a;animation:tosDust 9s linear infinite}
+.tos .phone{position:absolute;left:50%;top:50%;width:min(400px,92vw);height:min(840px,94%);transform:translate(-50%,-50%);border-radius:46px;border:10px solid #07080b;background:${NIGHT};overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 0 120px rgba(51,70,255,.35),0 40px 80px rgba(0,0,0,.6)}
+@media (max-width:520px){.tos .phone{width:100%;height:100%;border-radius:0;border:0}}
+@media (prefers-reduced-motion: reduce){.tos .hot.target .ring,.tos .blink,.tos .buzz,.tos .grain,.tos .dust{animation:none}}
+`
+
+/* ───────────────────────── Retro popup (the web's voice) ───────────────────────── */
+
+function Win(props: { title: string; children: ReactNode; style?: CSSProperties; onClose?: () => void; alert?: boolean; titleId?: string }) {
+    const { title, children, style, onClose, alert, titleId } = props
+    return (
+        <div style={{ background: PAPER, color: INK, border: `2px solid ${INK}`, boxShadow: "6px 6px 0 rgba(0,0,0,.55)", ...style }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: alert ? BLUE : INK, color: "#fff", padding: "1px 4px 1px 10px", minHeight: 30 }}>
+                <span id={titleId} className="px" style={{ fontSize: 19, textTransform: "uppercase" }}>
+                    {title}
+                </span>
+                {onClose ? (
+                    <button onClick={onClose} aria-label="Close" style={{ width: 28, height: 22, display: "grid", placeItems: "center", background: PAPER, color: INK, border: `2px solid ${INK}` }}>
+                        <Icon name="x" size={13} />
+                    </button>
+                ) : (
+                    <span aria-hidden="true" style={{ width: 18, height: 16, background: PAPER, border: `2px solid ${INK}` }} />
+                )}
+            </div>
+            <div style={{ padding: 14 }}>{children}</div>
+        </div>
+    )
+}
+
+/* ───────────────────────── Apartment facade ───────────────────────── */
+
+const FW = 1800
+const FH = 2440
+const FC = 9
+const FR = 14
+const VIEWER = { c: 2, r: 6 }
+const STUDENT = { c: 6, r: 8 }
+type Spot = { c: number; r: number }
+type Lit = "blue" | "amber" | "bright" | "watcher"
+type Level = "overview" | "near" | "inside"
+
+function winRect(c: number, r: number) {
+    return { x: c * 200 + 45, y: r * 170 + 40, w: 110, h: 92 }
+}
+function winCenter(s: Spot) {
+    const w = winRect(s.c, s.r)
+    return { x: w.x + w.w / 2, y: w.y + w.h / 2 }
+}
+const WATCH_ORDER = (() => {
+    const all: string[] = []
+    for (let r = 0; r < FR; r++) for (let c = 0; c < FC; c++) if (!(c === STUDENT.c && r === STUDENT.r) && !(c === VIEWER.c && r === VIEWER.r)) all.push(`${c}-${r}`)
+    return all.sort((a, b) => {
+        const [ac, ar] = a.split("-").map(Number)
+        const [bc, br] = b.split("-").map(Number)
+        return hash(ac, ar, 5) - hash(bc, br, 5)
+    })
+})()
+
+function facadeView(level: Level, focus: Spot | null, w: number, h: number) {
+    const s0 = Math.max(w / FW, h / FH)
+    const p = focus ? winCenter(focus) : { x: FW / 2, y: FH / 2 }
+    let scale = s0
+    if (level === "near") scale = s0 * 2.4
+    if (level === "inside") scale = Math.max(w / 104, h / 86) * 1.06
+    let x = w / 2 - p.x * scale
+    let y = h / 2 - p.y * scale
+    x = clamp(x, w - FW * scale, 0)
+    y = clamp(y, h - FH * scale, 0)
+    return { x, y, scale }
+}
+
+function Facade(props: { lit: Record<string, Lit>; focus: Spot | null; level: Level; initialLevel?: Level; duration?: number; reticle?: Spot | null; style?: CSSProperties; still?: boolean }) {
+    const { lit, focus, level, initialLevel, duration = 1.4, reticle, style, still } = props
+    const ref = useRef<HTMLDivElement>(null)
+    const box = useBox(ref)
+    const v = facadeView(level, focus, box.w, box.h)
+    const v0 = facadeView(initialLevel || level, focus, box.w, box.h)
+
+    const walls = useMemo(() => {
+        const out: ReactNode[] = []
+        for (let r = 0; r < FR; r++) {
+            out.push(<rect key={`slab${r}`} x={0} y={r * 170 + 8} width={FW} height={4} fill="#3c4356" />)
+        }
+        for (let c = 0; c <= FC; c++) out.push(<rect key={`seam${c}`} x={c * 200 - 1} y={0} width={2} height={FH} fill="#495064" />)
+        for (let r = 0; r < FR; r++) out.push(<rect key={`log${r}`} x={4 * 200 + 16} y={r * 170 + 136} width={168} height={30} fill="#6d7488" />)
+        return out
+    }, [])
+
+    return (
+        <div ref={ref} aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#2a3040", ...style }}>
+            {box.ok && <motion.div initial={{ x: v0.x, y: v0.y, scale: v0.scale }} animate={{ x: v.x, y: v.y, scale: v.scale }} transition={still ? { duration: 0 } : { duration, ease: [0.65, 0, 0.25, 1] }} style={{ position: "absolute", left: 0, top: 0, width: FW, height: FH, transformOrigin: "0 0" }}>
+                <svg viewBox={`0 0 ${FW} ${FH}`} width={FW} height={FH} style={{ display: "block" }}>
+                    <defs>
+                        <linearGradient id="tosWall" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0" stopColor="#4c546a" />
+                            <stop offset="1" stopColor="#5b6378" />
+                        </linearGradient>
+                        <linearGradient id="tosAmber" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0" stopColor="#FFD39A" />
+                            <stop offset="1" stopColor="#F59A4A" />
+                        </linearGradient>
+                        <linearGradient id="tosBlueG" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0" stopColor="#8E98FF" />
+                            <stop offset="1" stopColor={BLUE} />
+                        </linearGradient>
+                        <filter id="tosBlur" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="22" />
+                        </filter>
+                    </defs>
+                    <rect width={FW} height={FH} fill="url(#tosWall)" />
+                    {walls}
+                    {/* glows */}
+                    {Object.entries(lit).map(([k, t]) => {
+                        const [c, r] = k.split("-").map(Number)
+                        const w = winRect(c, r)
+                        const warm = t === "amber" || t === "bright"
+                        const g = t === "bright" ? 90 : 40
+                        return <rect key={`g${k}`} x={w.x - g} y={w.y - g} width={w.w + g * 2} height={w.h + g * 2} fill={warm ? AMBER : BLUE} opacity={t === "bright" ? 0.9 : warm ? 0.55 : 0.5} filter="url(#tosBlur)" style={{ transition: "all 1.2s ease" }} />
+                    })}
+                    {Array.from({ length: FR }).flatMap((_, r) =>
+                        Array.from({ length: FC }).map((__, c) => {
+                            const k = `${c}-${r}`
+                            const t = lit[k]
+                            const w = winRect(c, r)
+                            const h1 = hash(c, r, 1)
+                            const glass = t === "amber" || t === "bright" ? "url(#tosAmber)" : t ? "url(#tosBlueG)" : h1 < 0.5 ? "#1a1f2b" : "#232938"
+                            const mx = w.x + w.w * (h1 < 0.5 ? 0.42 : 0.58)
+                            return (
+                                <g key={k}>
+                                    <rect x={w.x} y={w.y} width={w.w} height={w.h} fill="#c9ccd4" />
+                                    <rect x={w.x + 5} y={w.y + 5} width={w.w - 10} height={w.h - 10} fill={glass} />
+                                    {!t && h1 > 0.62 && <rect x={w.x + 5} y={w.y + 5} width={(w.w - 10) * 0.45} height={w.h - 10} fill="#8f95a5" opacity={0.35} />}
+                                    {(t === "amber" || t === "bright") && (
+                                        <g>
+                                            <rect x={w.x + 5} y={w.y + 5} width={30} height={w.h - 10} fill="#fff1db" opacity={0.45} />
+                                            {level !== "inside" && <circle cx={w.x + 70} cy={w.y + 40} r={9} fill="#2a1a12" />}
+                                            {level !== "inside" && <rect x={w.x + 57} y={w.y + 52} width={26} height={35} rx={8} fill="#2a1a12" />}
+                                        </g>
+                                    )}
+                                    {t === "watcher" && (
+                                        <g>
+                                            <circle cx={w.x + w.w / 2} cy={w.y + 50} r={13} fill="#0b0d1a" />
+                                            <rect x={w.x + w.w / 2 - 26} y={w.y + 64} width={52} height={23} rx={10} fill="#0b0d1a" />
+                                            <rect x={w.x + w.w / 2 + 8} y={w.y + 60} width={10} height={16} fill="#dfe3ff" />
+                                        </g>
+                                    )}
+                                    <path d={`M${mx} ${w.y + 5}V${w.y + w.h - 5} M${w.x + 5} ${w.y + w.h * 0.3}H${mx}`} stroke="#c9ccd4" strokeWidth={4} />
+                                    <rect x={w.x - 6} y={w.y + w.h} width={w.w + 12} height={7} fill="#727a8e" />
+                                    {h1 > 0.86 && <rect x={w.x + w.w - 30} y={w.y + w.h + 10} width={30} height={22} fill="#b8bcc6" />}
+                                </g>
+                            )
+                        })
+                    )}
+                    {/* dusk tint */}
+                    <rect width={FW} height={FH} fill="#1b2238" opacity={0.25} style={{ mixBlendMode: "multiply" }} />
+                    {reticle &&
+                        (() => {
+                            const w = winRect(reticle.c, reticle.r)
+                            const p = 26
+                            const L = 30
+                            const x0 = w.x - p
+                            const y0 = w.y - p
+                            const x1 = w.x + w.w + p
+                            const y1 = w.y + w.h + p
+                            return (
+                                <path
+                                    d={`M${x0} ${y0 + L}V${y0}H${x0 + L} M${x1 - L} ${y0}H${x1}V${y0 + L} M${x1} ${y1 - L}V${y1}H${x1 - L} M${x0 + L} ${y1}H${x0}V${y1 - L}`}
+                                    fill="none"
+                                    stroke="#fff"
+                                    strokeWidth={5}
+                                />
+                            )
+                        })()}
+                </svg>
+            </motion.div>}
+        </div>
+    )
+}
+
+/* ───────────────────────── Room scene (warm, cinematic) ───────────────────────── */
+
+function RoomSVG(props: { beat: number; buzz: boolean }) {
+    const { beat, buzz } = props
+    const morning = beat >= 2
+    return (
+        <svg viewBox="0 0 1600 900" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" style={{ display: "block" }}>
+            <defs>
+                <linearGradient id="rWall" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#2b2230" />
+                    <stop offset="1" stopColor="#3b2d2c" />
+                </linearGradient>
+                <pattern id="rStripe" width="34" height="34" patternUnits="userSpaceOnUse">
+                    <rect x="0" y="0" width="3" height="34" fill="#ffe0bd" opacity=".05" />
+                    <rect x="16" y="0" width="1" height="34" fill="#000" opacity=".12" />
+                </pattern>
+                <radialGradient id="rLamp" cx="0.5" cy="0.5" r="0.5">
+                    <stop offset="0" stopColor="#FFB45E" stopOpacity=".62" />
+                    <stop offset=".5" stopColor="#FF9A45" stopOpacity=".18" />
+                    <stop offset="1" stopColor="#FF9A45" stopOpacity="0" />
+                </radialGradient>
+                <radialGradient id="rScreen" cx="0.5" cy="0.5" r="0.5">
+                    <stop offset="0" stopColor={BLUE_GLOW} stopOpacity=".5" />
+                    <stop offset="1" stopColor={BLUE} stopOpacity="0" />
+                </radialGradient>
+                <linearGradient id="rWood" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#9a6a43" />
+                    <stop offset="1" stopColor="#5b3c27" />
+                </linearGradient>
+                <linearGradient id="rWoodDark" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#4a3122" />
+                    <stop offset="1" stopColor="#24170f" />
+                </linearGradient>
+                <linearGradient id="rScreenFill" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stopColor="#5767FF" />
+                    <stop offset="1" stopColor="#2733C8" />
+                </linearGradient>
+                <linearGradient id="rBeige" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stopColor="#efe6d2" />
+                    <stop offset="1" stopColor="#b9ad96" />
+                </linearGradient>
+                <linearGradient id="rSky" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor={morning ? "#7d8aa6" : "#1a2033"} />
+                    <stop offset="1" stopColor={morning ? "#d9a27a" : "#2d3550"} />
+                </linearGradient>
+                <linearGradient id="rBeam" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stopColor="#ffd7a8" stopOpacity=".14" />
+                    <stop offset="1" stopColor="#ffd7a8" stopOpacity="0" />
+                </linearGradient>
+            </defs>
+            {/* wall */}
+            <rect width="1600" height="660" fill="url(#rWall)" />
+            <rect width="1600" height="640" fill="url(#rStripe)" />
+            <rect x="0" y="0" width="1600" height="26" fill="#1b1519" />
+            {/* floor */}
+            <rect y="640" width="1600" height="260" fill="#1a1315" />
+            <rect y="636" width="1600" height="8" fill="#120d0f" />
+            {/* window to the outside: the building across */}
+            <rect x="122" y="112" width="416" height="346" fill="#21171a" />
+            <rect x="140" y="130" width="380" height="310" fill="url(#rSky)" />
+            {[0, 1, 2].map((bx) => (
+                <g key={bx}>
+                    <rect x={150 + bx * 130} y={170 - bx * 20} width="110" height="270" fill={morning ? "#5e6780" : "#3a4255"} />
+                    {Array.from({ length: 12 }).map((_, k) => {
+                        const wx = 160 + bx * 130 + (k % 3) * 34
+                        const wy = 186 - bx * 20 + Math.floor(k / 3) * 58
+                        const viewer = bx === 1 && k === 4
+                        const watcher = beat >= 2 && (k + bx) % 4 === 1
+                        return (
+                            <g key={k}>
+                                <rect x={wx} y={wy} width="22" height="30" fill={viewer || watcher ? BLUE_GLOW : morning ? "#3d455a" : "#1a1f2c"} />
+                                {(viewer || watcher) && <rect x={wx - 6} y={wy - 6} width="34" height="42" fill={BLUE} opacity=".25" />}
+                                {watcher && <rect x={wx + 6} y={wy + 12} width="10" height="18" fill="#0b0d1a" />}
+                            </g>
+                        )
+                    })}
+                </g>
+            ))}
+            <rect x="326" y="130" width="8" height="310" fill="#21171a" />
+            <path d="M104 100 C140 240 100 380 150 476 L86 476 L86 100 Z" fill="#5b3a33" />
+            <path d="M556 100 C520 240 560 380 512 476 L574 476 L574 100 Z" fill="#5b3a33" />
+            <path d="M104 100 C140 240 100 380 150 476" stroke="#8a5a48" strokeWidth="4" fill="none" opacity=".6" />
+            {/* light beam */}
+            <polygon points="250,0 560,0 1180,640 760,640" fill="url(#rBeam)" />
+            {/* calendar */}
+            <rect x="598" y="160" width="172" height="196" fill="#e8dfcf" />
+            <rect x="598" y="160" width="172" height="30" fill="#8b3a2b" />
+            {Array.from({ length: 20 }).map((_, i) => {
+                const cx = 612 + (i % 5) * 31
+                const cy = 204 + Math.floor(i / 5) * 36
+                const busy = [1, 2, 3, 6, 7, 8, 9, 11, 12, 13].includes(i)
+                return (
+                    <g key={i}>
+                        <rect x={cx} y={cy} width="26" height="30" fill="#f4eee3" stroke="#cfc4b0" />
+                        {busy && <rect x={cx + 3} y={cy + 18} width="20" height="7" fill="#4a3b33" />}
+                    </g>
+                )
+            })}
+            <circle cx="753" cy="219" r="16" fill="none" stroke="#b5432f" strokeWidth="3" />
+            <rect x="598" y="160" width="172" height="196" fill="#000" opacity=".25" />
+            {/* shelf */}
+            <rect x="850" y="262" width="340" height="14" fill="url(#rWood)" />
+            <rect x="850" y="276" width="340" height="6" fill="#20150f" />
+            <rect x="880" y="236" width="56" height="26" rx="6" fill="#c9c0b0" />
+            <rect x="950" y="230" width="70" height="32" rx="6" fill="#d8d0c0" />
+            <rect x="1040" y="240" width="60" height="22" rx="6" fill="#b9b0a0" />
+            {/* poster */}
+            <rect x="1210" y="160" width="130" height="170" fill="#1d1a1f" />
+            <rect x="1222" y="172" width="106" height="110" fill="#3c3340" />
+            <circle cx="1275" cy="226" r="30" fill="#8a5a48" opacity=".7" />
+            <rect x="1222" y="292" width="80" height="8" fill="#cfc4b0" opacity=".6" />
+            {/* lamp glow */}
+            <circle cx="1290" cy="460" r="520" fill="url(#rLamp)" />
+            {/* desk */}
+            <path d="M800 556 H1400 L1410 584 H790 Z" fill="url(#rWood)" />
+            <path d="M790 584 H1410" stroke="#d29a68" strokeWidth="2" opacity=".7" />
+            <rect x="820" y="584" width="24" height="220" fill="url(#rWoodDark)" />
+            <rect x="1180" y="584" width="200" height="150" fill="url(#rWoodDark)" />
+            <rect x="1190" y="600" width="180" height="56" fill="#2f2018" />
+            <rect x="1265" y="624" width="30" height="5" fill="#a77850" />
+            {/* computer (CRT) */}
+            <circle cx="1080" cy="470" r="270" fill="url(#rScreen)" />
+            <rect x="1020" y="526" width="120" height="30" fill="#a89c86" />
+            <rect x="986" y="370" width="188" height="160" rx="10" fill="url(#rBeige)" />
+            <rect x="1004" y="386" width="152" height="118" rx="4" fill="url(#rScreenFill)" />
+            <rect x="1004" y="386" width="152" height="10" fill="#7d8bff" opacity=".6" />
+            <rect x="1040" y="440" width="80" height="5" fill="#dfe3ff" opacity=".85" />
+            <rect x="1004" y="386" width="152" height="118" rx="4" fill="#fff" opacity=".06" />
+            <circle cx="1160" cy="518" r="3" fill="#5bff8a" />
+            <rect x="992" y="548" width="160" height="12" rx="3" fill="#d9cfbb" />
+            {/* phone */}
+            <g className={buzz ? "buzz" : undefined}>
+                {buzz && <circle cx="886" cy="548" r="60" fill={BLUE_GLOW} opacity=".25" />}
+                <rect x="860" y="540" width="52" height="16" rx="4" fill="#0e0e12" />
+                {buzz && <rect x="864" y="542" width="44" height="12" rx="2" fill="#dfe3ff" />}
+            </g>
+            {/* mug */}
+            <rect x="932" y="520" width="32" height="38" rx="4" fill="#ece4d6" />
+            <path d="M964 528 q14 10 0 22" stroke="#ece4d6" strokeWidth="5" fill="none" />
+            {/* CDs */}
+            <ellipse cx="1180" cy="566" rx="24" ry="7" fill="#d9dbe3" opacity=".8" />
+            {/* bills */}
+            <g transform="rotate(-6 1255 545)">
+                <rect x="1212" y="534" width="88" height="22" fill="#e9e2d4" />
+                <rect x="1218" y="526" width="86" height="24" fill="#f5efe4" />
+                <rect x="1226" y="532" width="36" height="7" fill="#b5432f" />
+                <rect x="1226" y="543" width="60" height="3" fill="#9e9586" />
+            </g>
+            {/* lamp */}
+            <rect x="1320" y="546" width="50" height="12" rx="3" fill="#18141a" />
+            <path d="M1345 548 L1320 460 L1280 450" stroke="#18141a" strokeWidth="8" fill="none" />
+            <path d="M1250 430 l60 10 -10 30 -60 -10 Z" fill="#18141a" />
+            <ellipse cx="1272" cy="466" rx="26" ry="6" fill="#FFE2B0" />
+            {/* plant */}
+            <rect x="1376" y="512" width="34" height="44" fill="#8a4a33" />
+            <path d="M1392 512 C1380 470 1350 460 1340 440 M1394 512 C1400 460 1420 440 1440 430 M1393 512 C1393 470 1396 450 1392 420" stroke="#3f5a3a" strokeWidth="6" fill="none" />
+            {/* door */}
+            <rect x="1420" y="190" width="170" height="452" fill="url(#rWoodDark)" />
+            <rect x="1440" y="215" width="130" height="180" fill="#000" opacity=".18" />
+            <rect x="1440" y="420" width="130" height="190" fill="#000" opacity=".18" />
+            <circle cx="1446" cy="420" r="7" fill="#c9a06a" />
+            <rect x="1420" y="638" width="170" height="6" fill="#FFCF8A" opacity=".75" />
+            {/* bed */}
+            <path d="M0 600 C120 574 420 574 580 612 L580 700 L0 700 Z" fill="#2c2f3f" />
+            <path d="M0 604 C140 580 400 580 580 614" stroke="#6a5a66" strokeWidth="3" fill="none" opacity=".6" />
+            <ellipse cx="90" cy="596" rx="88" ry="24" fill="#8f877c" />
+            <rect y="700" width="580" height="40" fill="#120d10" />
+            {/* backpack */}
+            <path d="M690 650 q0 -60 50 -60 q50 0 50 60 v80 h-100 Z" fill="#4a2a26" />
+            <rect x="710" y="670" width="60" height="30" rx="4" fill="#3a201d" />
+            {/* chair foreground */}
+            <path d="M20 900 C10 760 40 690 120 660 C200 630 330 640 380 700 C420 750 420 840 410 900 Z" fill="#0c0a0b" />
+            <path d="M120 662 C200 636 320 646 372 700" stroke="#3a2f2c" strokeWidth="3" fill="none" opacity=".7" />
+            {/* camera */}
+            {beat >= 1 && (
+                <g>
+                    <rect x="1496" y="30" width="64" height="30" rx="5" fill="#16141a" />
+                    <circle cx="1510" cy="45" r="10" fill="#2a2d3c" />
+                    <circle cx="1510" cy="45" r="4" fill="#8f97b8" />
+                    <rect x="1556" y="22" width="10" height="20" fill="#16141a" />
+                    <circle className="blink" cx="1546" cy="40" r="4" fill={BLUE_GLOW} />
+                </g>
+            )}
+        </svg>
+    )
+}
+
+/* ───────────────────────── Main component ───────────────────────── */
+
+interface Props {
+    storyHandle: string
+    caption: string
+    startAt?: "intro" | "feed" | "pov" | "room"
+    style?: CSSProperties
+}
+
+/**
+ * THE OTHER SIDE — a building at night → a feed → a comment → a life → a crowd.
+ *
+ * @framerIntrinsicWidth 1200
+ * @framerIntrinsicHeight 800
+ *
+ * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutHeight any-prefer-fixed
+ */
+export default function TheOtherSide(props: Props) {
+    const { storyHandle = "room017", caption = "dropped out at 20 lol 💀 #college" } = props
+    const reduce = useReducedMotion() || false
+
+    const startAt = props.startAt || "intro"
+    const [phase, setPhase] = useState<Phase>(startAt === "pov" ? "transit" : startAt)
+    useEffect(() => {
+        setPhase(startAt === "pov" ? "transit" : startAt)
+        if (startAt === "room" || startAt === "pov") setLiked("c1")
+        if (startAt === "pov") setTransitStep(3)
+    }, [startAt])
+    const [introStep, setIntroStep] = useState(0)
+    const [transitStep, setTransitStep] = useState(0)
+    const [drawer, setDrawer] = useState(false)
+    const [storyLiked, setStoryLiked] = useState(false)
+    const [liked, setLiked] = useState<string | null>(null)
+    const [coachSeen, setCoachSeen] = useState(false)
+    const [visited, setVisited] = useState<ObjId[]>([])
+    const [beat, setBeat] = useState(0)
+    const [picks, setPicks] = useState<Option[]>([])
+    const [stats, setStats] = useState<Stats>(START)
+    const [open, setOpen] = useState<ObjId | null>(null)
+    const [outcome, setOutcome] = useState<Option | null>(null)
+    const [socratic, setSocratic] = useState<string | null>(null)
+    const [hint, setHint] = useState<ObjId | null>(null)
+    const [ready, setReady] = useState(false)
+    const [newComment, setNewComment] = useState<string | null>(null)
+    const [draft, setDraft] = useState("")
+    const [done, setDone] = useState(false)
+    const [watchStep, setWatchStep] = useState(0)
+    const [watchers, setWatchers] = useState(0)
+    const [flash, setFlash] = useState<string | null>(null)
+    const [epiStep, setEpiStep] = useState(0)
+    const [kept, setKept] = useState(false)
+
+    useEffect(() => {
+        const saved = safeGet("tos.comment")
+        if (saved) {
+            startTransition(() => {
+                setNewComment(saved)
+                setDone(true)
+            })
+        }
+        if (safeGet("tos.coach")) setCoachSeen(true)
+    }, [])
+
+    const likedComment = COMMENTS.find((c) => c.id === liked) || null
+    const target: ObjId | null = phase === "room" && ready && beat < 3 ? BEATS[beat].obj : null
+
+    const resetRun = useCallback(() => {
+        setVisited([])
+        setBeat(0)
+        setPicks([])
+        setStats(START)
+        setOpen(null)
+        setOutcome(null)
+        setSocratic(null)
+        setHint(null)
+        setReady(false)
+        setWatchStep(0)
+        setWatchers(0)
+    }, [])
+
+    /* ── intro: dark building → a window lights → notification ── */
+    const beginIntro = () => {
+        if (introStep !== 0) return
+        setIntroStep(1)
+    }
+    useEffect(() => {
+        if (phase !== "intro" || introStep === 0) return
+        const ts: number[] = []
+        if (introStep === 1) ts.push(window.setTimeout(() => setIntroStep(2), reduce ? 300 : 1100))
+        if (introStep === 2)
+            ts.push(
+                window.setTimeout(() => {
+                    ding()
+                    setIntroStep(3)
+                }, reduce ? 200 : 1300)
+            )
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [phase, introStep, reduce])
+
+    const openFeed = () => startTransition(() => setPhase("feed"))
+
+    /* ── like a comment → zoom out → into another window ── */
+    const likeComment = (id: string) => {
+        if (liked) return
+        setLiked(id)
+        setCoachSeen(true)
+        safeSet("tos.coach", "1")
+        window.setTimeout(() => {
+            startTransition(() => {
+                setDrawer(false)
+                resetRun()
+                setTransitStep(0)
+                setPhase("transit")
+            })
+        }, reduce ? 200 : 700)
+    }
+    useEffect(() => {
+        if (phase !== "transit" || startAt === "pov") return
+        const seq = reduce ? [100, 300, 600, 1400, 4600] : [1500, 2300, 4500, 7300, 11200]
+        const ts = seq.map((ms, i) => window.setTimeout(() => (i < 4 ? setTransitStep(i + 1) : setPhase("room")), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [phase, reduce])
+
+    const toFeed = () => {
+        startTransition(() => {
+            setPhase("feed")
+            setDrawer(false)
+            setLiked(null)
+            resetRun()
+        })
+    }
+
+    /* ── room ── */
+    useEffect(() => {
+        if (phase !== "room" || ready) return
+        const t = window.setTimeout(() => setReady(true), 4000)
+        return () => window.clearTimeout(t)
+    }, [phase, ready])
+    useEffect(() => {
+        if (phase === "room" && visited.length > 0 && !ready) setReady(true)
+    }, [visited, phase, ready])
+    useEffect(() => {
+        if (phase !== "room" || open || outcome) return
+        setHint(null)
+        const t = window.setTimeout(() => setHint(target), 8000)
+        return () => window.clearTimeout(t)
+    }, [phase, open, outcome, target, visited])
+
+    /* ── watched: the building lights up, one screen at a time ── */
+    useEffect(() => {
+        if (phase !== "watched") return
+        if (reduce) {
+            setWatchStep(5)
+            setWatchers(60)
+            return
+        }
+        setWatchStep(0)
+        setWatchers(0)
+        const ts = [1600, 2600, 3600, 5600, 7400].map((ms, i) => window.setTimeout(() => setWatchStep(i + 1), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [phase, reduce])
+    useEffect(() => {
+        if (phase !== "watched" || watchStep < 1 || watchers >= 60) return
+        const t = window.setTimeout(() => setWatchers((n) => Math.min(60, n + 3)), 90)
+        return () => window.clearTimeout(t)
+    }, [phase, watchStep, watchers])
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return
+            if (drawer) setDrawer(false)
+            else if (open && !outcome) setOpen(null)
+        }
+        window.addEventListener("keydown", onKey)
+        return () => window.removeEventListener("keydown", onKey)
+    }, [drawer, open, outcome])
+
+    const openObj = (id: ObjId) => {
+        setSocratic(null)
+        setHint(null)
+        setVisited((v) => (v.includes(id) ? v : [...v, id]))
+        setOpen(id)
+    }
+    const choose = (opt: Option) => {
+        setStats((s) => ({
+            money: s.money + (opt.d.money || 0),
+            energy: clamp(s.energy + (opt.d.energy || 0), 0, 100),
+            grade: clamp(s.grade + (opt.d.grade || 0), 0, 100),
+        }))
+        setPicks((p) => [...p, opt])
+        setOutcome(opt)
+        setFlash(opt.outside)
+    }
+    const afterOutcome = () => {
+        const next = beat + 1
+        startTransition(() => {
+            setOutcome(null)
+            setOpen(null)
+            setFlash(null)
+            setBeat(next)
+            if (next >= 3) window.setTimeout(() => setPhase("watched"), reduce ? 0 : 500)
+            else if (next === 1) setSocratic(SOCRATIC[0])
+        })
+    }
+    const askSocratic = () => {
+        if (!socratic) return
+        let pick: ObjId
+        if (beat === 1) {
+            const ev = likedComment?.evidence
+            pick = ev && !visited.includes(ev) ? ev : (["calendar", "door", "laptop", "bills"] as ObjId[]).find((o) => !visited.includes(o)) || "calendar"
+        } else pick = "phone"
+        setSocratic(null)
+        setHint(pick)
+    }
+    const finish = (text: string | null) => {
+        const c = text && text.trim() ? text.trim() : likedComment?.text || ""
+        setNewComment(c)
+        safeSet("tos.comment", c)
+        setKept(!(text && text.trim()))
+        setEpiStep(0)
+        startTransition(() => setPhase("epilogue"))
+    }
+    const endToFeed = () => {
+        setDone(true)
+        startTransition(() => {
+            setPhase("feed")
+            setDrawer(true)
+            setLiked(null)
+        })
+    }
+    useEffect(() => {
+        if (phase !== "epilogue") return
+        const seq = reduce ? [100, 300, 600] : [1000, 3000, 4600]
+        const ts = seq.map((ms, i) => window.setTimeout(() => setEpiStep(i + 1), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [phase, reduce])
+
+    /* ── facade state per phase ── */
+    const facade = useMemo(() => {
+        const lit: Record<string, Lit> = {}
+        const v = `${VIEWER.c}-${VIEWER.r}`
+        const s = `${STUDENT.c}-${STUDENT.r}`
+        let level: Level = "overview"
+        let focus: Spot | null = null
+        let duration = 1.4
+        if (phase === "intro") {
+            if (introStep >= 1) lit[v] = "blue"
+            if (introStep >= 2) {
+                level = "near"
+                focus = VIEWER
+                duration = 1.3
+            }
+        } else if (phase === "feed") {
+            lit[v] = "blue"
+            level = "near"
+            focus = VIEWER
+        } else if (phase === "transit") {
+            lit[v] = "blue"
+            if (transitStep >= 1) lit[s] = "amber"
+            level = transitStep >= 2 ? "inside" : "overview"
+            focus = transitStep >= 2 ? STUDENT : null
+            duration = transitStep >= 2 ? 2.2 : 1.4
+        } else if (phase === "watched") {
+            lit[s] = "amber"
+            WATCH_ORDER.slice(0, watchers).forEach((k) => (lit[k] = "watcher"))
+            focus = STUDENT
+            duration = 1.6
+            if (watchStep >= 4) {
+                lit[v] = "watcher"
+                focus = VIEWER
+                level = "near"
+                duration = 2
+            }
+        } else if (phase === "epilogue") {
+            lit[s] = epiStep >= 2 && !kept ? "bright" : "amber"
+            lit[v] = epiStep >= 2 && !kept ? "amber" : "blue"
+            focus = STUDENT
+            level = epiStep >= 1 ? "near" : "overview"
+            duration = 2
+        }
+        const reticleAt: Spot | null = phase === "watched" && watchStep >= 1 ? (watchStep >= 4 ? VIEWER : STUDENT) : null
+        return { lit, level, focus, duration, reticleAt }
+    }, [phase, introStep, transitStep, watchers, watchStep, epiStep, kept])
+
+    const showFacade = phase === "intro" || phase === "feed" || (phase === "transit" && transitStep < 4) || phase === "watched" || phase === "epilogue"
+    const progress = phase === "intro" || phase === "feed" ? 0 : phase === "transit" || phase === "room" ? 1 : phase === "watched" ? 2 : 3
+    const finalCaption = picks[2]?.id === "stay" ? "on academic probation lol 💀 #college" : caption
+
+    return (
+        <div className="tos" style={{ ...props.style, position: "relative", width: "100%", height: "100%", overflow: "hidden", background: NIGHT }}>
+            <style>{CSS}</style>
+            <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=VT323&family=Instrument+Serif:ital@0;1&display=swap" />
+
+            {showFacade && (
+                <motion.div
+                    key={phase === "watched" ? "fw" : phase === "epilogue" ? "fe" : "fm"}
+                    initial={{ opacity: phase === "watched" || phase === "epilogue" ? 0 : 1 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.8 }}
+                    style={{ position: "absolute", inset: 0, filter: phase === "feed" ? "blur(6px) brightness(.55)" : "blur(0px) brightness(1)", transition: "filter .8s ease" }}
+                >
+                    <Facade lit={facade.lit} level={facade.level} focus={facade.focus} duration={reduce ? 0.01 : facade.duration} initialLevel={phase === "watched" ? "inside" : undefined} reticle={facade.reticleAt} />
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                        <div className="grain" />
+                    </div>
+                    <div className="vignette" />
+                </motion.div>
+            )}
+
+            {phase !== "intro" && phase !== "feed" && (
+                <TopBar progress={progress} onBack={toFeed} onSkip={phase === "transit" ? () => setPhase("room") : phase === "watched" && watchStep < 5 ? () => { setWatchStep(5); setWatchers(60) } : undefined} />
+            )}
+
+            <AnimatePresence mode="wait" initial={false}>
+                {phase === "intro" && (
+                    <motion.div key="intro" initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} style={{ position: "absolute", inset: 0 }}>
+                        <Intro step={introStep} onBegin={beginIntro} onOpen={openFeed} handle={storyHandle} caption={caption} reduce={reduce} />
+                    </motion.div>
+                )}
+
+                {phase === "feed" && (
+                    <motion.div key="feed" initial={{ opacity: 0, scale: reduce ? 1 : 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.9 }} transition={{ duration: 0.45 }} style={{ position: "absolute", inset: 0 }}>
+                        <div className="phone">
+                            <Feed
+                                handle={storyHandle}
+                                caption={caption}
+                                storyLiked={storyLiked}
+                                onStoryLike={() => setStoryLiked((v) => !v)}
+                                onComments={() => setDrawer(true)}
+                                done={done}
+                                onReplay={() => {
+                                    setDone(false)
+                                    setNewComment(null)
+                                    safeSet("tos.comment", "")
+                                    setDrawer(true)
+                                }}
+                            />
+                            <Drawer open={drawer} onClose={() => setDrawer(false)} liked={liked} onLike={likeComment} showCoach={!coachSeen && !done} mine={done ? newComment : null} reduce={reduce} />
+                        </div>
+                    </motion.div>
+                )}
+
+                {phase === "transit" && (
+                    <motion.div key="transit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} onClick={() => setPhase("room")} style={{ position: "absolute", inset: 0, cursor: "pointer" }}>
+                        <AnimatePresence>
+                            {transitStep >= 3 && (
+                                <motion.div key="pov" initial={startAt === "pov" ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ position: "absolute", inset: 0 }}>
+                                    <PhonePOV lowered={transitStep >= 4} liked={likedComment} handle={storyHandle} caption={caption} reduce={reduce} still={startAt === "pov"} />
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </motion.div>
+                )}
+
+                {phase === "room" && (
+                    <motion.div key="room" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.7 }} style={{ position: "absolute", inset: 0 }}>
+                        <Room beat={beat} visited={visited} target={target} hint={hint} onOpen={openObj} reduce={reduce} flash={flash} />
+                        <Hud stats={stats} clock={CLOCK[beat]} />
+                        <ObjectCard open={open} beat={beat} stats={stats} outcome={outcome} onChoose={choose} onClose={() => setOpen(null)} onNext={afterOutcome} reduce={reduce} />
+                        {socratic && !open && (
+                            <motion.button initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} onClick={askSocratic} className="glass serif" style={{ position: "absolute", left: "50%", bottom: 28, x: "-50%", padding: "10px 22px 10px 12px", fontSize: 26, fontStyle: "italic", zIndex: 6, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 12, borderRadius: 999 }}>
+                                <span className="px" style={{ fontStyle: "normal", fontSize: 24, background: BLUE, color: "#fff", width: 32, height: 32, borderRadius: 99, display: "grid", placeItems: "center" }}>
+                                    ?
+                                </span>
+                                {socratic}
+                            </motion.button>
+                        )}
+                    </motion.div>
+                )}
+
+                {phase === "watched" && (
+                    <motion.div key="watched" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} style={{ position: "absolute", inset: 0 }}>
+                        <WatchedOverlay step={watchStep} picks={picks} liked={likedComment} watchers={watchers} reduce={reduce} onNext={() => setPhase("reveal")} />
+                    </motion.div>
+                )}
+
+                {phase === "epilogue" && (
+                    <motion.div key="epilogue" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
+                        <Epilogue step={epiStep} comment={newComment || ""} kept={kept} reduce={reduce} onFeed={endToFeed} />
+                    </motion.div>
+                )}
+
+                {phase === "reveal" && (
+                    <motion.div key="reveal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.5 }} style={{ position: "absolute", inset: 0 }}>
+                        <Reveal caption={finalCaption} handle={storyHandle} liked={likedComment} visited={visited} picks={picks} onNext={() => setPhase("reflect")} reduce={reduce} />
+                    </motion.div>
+                )}
+
+                {(phase === "reflect" || phase === "rewrite") && (
+                    <motion.div key="reflect" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} style={{ position: "absolute", inset: 0, background: NIGHT }}>
+                        <Reflect
+                            phase={phase}
+                            liked={likedComment}
+                            draft={draft}
+                            setDraft={setDraft}
+                            onKeep={() => finish(null)}
+                            onRewrite={() => {
+                                setDraft(likedComment?.text || "")
+                                setPhase("rewrite")
+                            }}
+                            onPost={() => finish(draft)}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    )
+}
+
+/* ───────────────────────── Intro ───────────────────────── */
+
+function Intro(props: { step: number; onBegin: () => void; onOpen: () => void; handle: string; caption: string; reduce: boolean }) {
+    const { step, onBegin, onOpen, handle, caption, reduce } = props
+    useEffect(() => {
+        if (step !== 3) return
+        const t = window.setTimeout(onOpen, reduce ? 4000 : 4500)
+        return () => window.clearTimeout(t)
+    }, [step])
+    return (
+        <>
+            <div style={{ position: "absolute", left: 20, top: 18, display: "flex", alignItems: "center", gap: 10, color: TEXT, pointerEvents: "none" }}>
+                <Bitmap map={EYE} size={26} color={TEXT} />
+                <span className="px" style={{ fontSize: 26, textTransform: "uppercase" }}>
+                    The Other Side
+                </span>
+            </div>
+            {step === 0 && (
+                <button onClick={onBegin} aria-label="Begin" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: "8vh" }}>
+                    <span className="px blink" style={{ fontSize: 26, color: TEXT, textTransform: "uppercase", padding: "4px 14px", background: "rgba(10,12,18,.55)" }}>
+                        [ click anywhere ]
+                    </span>
+                </button>
+            )}
+            <AnimatePresence>
+                {step >= 3 && (
+                    <motion.button
+                        key="notif"
+                        onClick={onOpen}
+                        initial={{ y: reduce ? 0 : -120, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                        className="glass"
+                        aria-label={`New post from @${handle}: ${caption}. Open.`}
+                        style={{ position: "absolute", top: 18, left: "50%", x: "-50%", width: "min(420px, calc(100% - 32px))", display: "flex", gap: 12, alignItems: "center", padding: 12, textAlign: "left", background: "rgba(28,30,38,.86)", borderRadius: 20, zIndex: 5 }}
+                    >
+                        <span style={{ width: 40, height: 40, borderRadius: 10, background: BLUE, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                            <Bitmap map={EYE} size={24} color="#fff" />
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#a8abb6" }}>
+                                <span>THE OTHER SIDE</span>
+                                <span>now</span>
+                            </span>
+                            <span style={{ display: "block", fontWeight: 700, fontSize: 15, marginTop: 2 }}>@{handle} is trending</span>
+                            <span style={{ display: "block", fontSize: 14, color: "#d4d6de", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{caption}</span>
+                        </span>
+                    </motion.button>
+                )}
+            </AnimatePresence>
+        </>
+    )
+}
+
+/* ───────────────────────── Post illustrations ───────────────────────── */
+
+type ArtKind = "dropout" | "read" | "walked"
+
+function PostArt(props: { kind: ArtKind }) {
+    const { kind } = props
+    const id = useId().replace(/[^a-zA-Z0-9]/g, "")
+    if (kind === "dropout") {
+        return (
+            <svg viewBox="0 0 400 500" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" aria-hidden="true" style={{ display: "block" }}>
+                <defs>
+                    <linearGradient id={`sky${id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" stopColor="#232a47" />
+                        <stop offset=".55" stopColor="#7d5966" />
+                        <stop offset="1" stopColor="#e3a274" />
+                    </linearGradient>
+                    <radialGradient id={`sun${id}`} cx=".5" cy=".5" r=".5">
+                        <stop offset="0" stopColor="#ffd2a0" stopOpacity=".55" />
+                        <stop offset="1" stopColor="#ffd2a0" stopOpacity="0" />
+                    </radialGradient>
+                </defs>
+                <rect width="400" height="500" fill={`url(#sky${id})`} />
+                <circle cx="310" cy="330" r="150" fill={`url(#sun${id})`} />
+                {/* campus building */}
+                <polygon points="30,142 200,72 370,142" fill="#cbbfa8" />
+                <polygon points="60,138 200,84 340,138" fill="#b9ad95" />
+                <rect x="40" y="142" width="320" height="30" fill="#c2b69e" />
+                <text x="200" y="163" textAnchor="middle" fill="#6d6352" style={{ fontFamily: "Georgia, serif", fontSize: 17, letterSpacing: 7 }}>
+                    UNIVERSITY
+                </text>
+                <rect x="50" y="172" width="300" height="160" fill="#9e9380" />
+                {[0, 1, 2, 3, 4].map((i) => (
+                    <rect key={`w${i}`} x={88 + i * 52} y={196} width="22" height="44" fill={i === 1 || i === 3 ? "#ffcf8a" : "#3a3240"} opacity=".85" />
+                ))}
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <g key={`c${i}`}>
+                        <rect x={60 + i * 52} y="172" width="24" height="160" fill="#dcd1bc" />
+                        <rect x={78 + i * 52} y="172" width="6" height="160" fill="#a3977f" opacity=".7" />
+                    </g>
+                ))}
+                <rect x="180" y="250" width="40" height="82" fill="#1e1a20" />
+                {[0, 1, 2, 3].map((i) => (
+                    <rect key={`s${i}`} x={40 - i * 14} y={332 + i * 14} width={320 + i * 28} height="14" fill={["#8f8572", "#857b69", "#7a705f", "#6e6555"][i]} />
+                ))}
+                <rect y="388" width="400" height="112" fill="#3a3341" />
+                <path d="M0 420 H400 M0 460 H400" stroke="#463e4e" strokeWidth="2" />
+                {/* flying paper */}
+                <g transform="rotate(-18 120 300)">
+                    <rect x="98" y="278" width="46" height="58" fill="#f3ede2" />
+                    <rect x="106" y="290" width="30" height="3" fill="#9e9586" />
+                    <rect x="106" y="298" width="24" height="3" fill="#9e9586" />
+                    <rect x="106" y="318" width="22" height="8" fill="none" stroke="#b5432f" strokeWidth="2" />
+                </g>
+                {/* student walking away */}
+                <ellipse cx="292" cy="484" rx="80" ry="8" fill="#000" opacity=".35" />
+                <circle cx="292" cy="328" r="16" fill="#141019" />
+                <path d="M268 348 h48 l7 84 h-62 Z" fill="#141019" />
+                <rect x="303" y="352" width="24" height="48" rx="7" fill="#5a2f2a" />
+                <rect x="232" y="374" width="44" height="36" fill="#a87b4f" />
+                <rect x="232" y="388" width="44" height="4" fill="#7d5a38" />
+                <rect x="271" y="430" width="15" height="54" fill="#141019" />
+                <rect x="299" y="426" width="15" height="54" fill="#141019" transform="rotate(8 306 430)" />
+            </svg>
+        )
+    }
+    if (kind === "read") {
+        return (
+            <svg viewBox="0 0 400 500" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" aria-hidden="true" style={{ display: "block" }}>
+                <rect width="400" height="500" fill="#14161d" />
+                <rect x="110" y="60" width="180" height="360" rx="26" fill="#1d2130" stroke="#2f3546" strokeWidth="4" />
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <rect key={i} x={i % 2 ? 130 : 170} y={100 + i * 46} width={i % 2 ? 110 : 100} height="30" rx="14" fill={i % 2 ? "#3a4154" : "#2a3042"} />
+                ))}
+                <text x="276" y="398" textAnchor="end" fill="#6b7080" style={{ fontFamily: "Inter, sans-serif", fontSize: 12 }}>
+                    Seen
+                </text>
+            </svg>
+        )
+    }
+    return (
+        <svg viewBox="0 0 400 500" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" aria-hidden="true" style={{ display: "block" }}>
+            <rect width="400" height="500" fill="#17131a" />
+            <rect x="140" y="80" width="130" height="320" fill="#ffcf8a" />
+            <polygon points="140,80 205,110 205,430 140,400" fill="#3b2a22" />
+            <circle cx="236" cy="200" r="16" fill="#1a1216" />
+            <path d="M216 222 h40 l6 120 h-52 Z" fill="#1a1216" />
+            <rect x="262" y="320" width="34" height="46" rx="4" fill="#5a3a30" />
+            <polygon points="140,400 270,400 360,500 40,500" fill="#ffcf8a" opacity=".18" />
+        </svg>
+    )
+}
+
+/* ───────────────────────── First-person: the phone goes down ───────────────────────── */
+
+function PhonePOV(props: { lowered: boolean; liked: Comment | null; handle: string; caption: string; reduce: boolean; still?: boolean }) {
+    const { lowered, liked, handle, caption, reduce, still } = props
+    const ref = useRef<HTMLDivElement>(null)
+    const box = useBox(ref)
+    const scale = Math.max(box.w / 1600, box.h / 900)
+    const sw = 1600 * scale
+    const sh = 900 * scale
+    const [likes, setLikes] = useState(18400)
+    const [line, setLine] = useState(0)
+
+    useEffect(() => {
+        if (lowered) return
+        const t = window.setInterval(() => setLikes((n) => n + 3 + Math.floor(Math.random() * 40)), 140)
+        return () => window.clearInterval(t)
+    }, [lowered])
+    useEffect(() => {
+        if (!lowered) return
+        const a = window.setTimeout(() => setLine(1), reduce ? 0 : 1100)
+        const b = window.setTimeout(() => setLine(2), reduce ? 0 : 2300)
+        return () => {
+            window.clearTimeout(a)
+            window.clearTimeout(b)
+        }
+    }, [lowered, reduce])
+
+    const skin = "#b9825f"
+    const shade = "#8e5c40"
+
+    return (
+        <div ref={ref} style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f" }}>
+            {/* the room behind the phone, out of focus until the phone goes down */}
+            <div
+                style={{
+                    position: "absolute",
+                    left: (box.w - sw) / 2,
+                    top: (box.h - sh) / 2,
+                    width: sw,
+                    height: sh,
+                    filter: lowered ? "blur(0px) brightness(1)" : "blur(10px) brightness(.4)",
+                    transform: lowered ? "scale(1) translateY(0)" : "scale(1.1) translateY(5%)",
+                    transition: reduce ? "none" : "filter 1.8s ease, transform 2s ease",
+                }}
+            >
+                <RoomSVG beat={0} buzz={false} />
+            </div>
+            <div className="vignette" />
+            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                <div className="grain" />
+            </div>
+
+            {/* hand + phone */}
+            <motion.div
+                initial={still ? false : { y: reduce ? "0%" : "35%", rotate: -3, opacity: 0 }}
+                animate={lowered ? { y: "135%", rotate: -16, opacity: 1 } : { y: "0%", rotate: -3, opacity: 1 }}
+                transition={lowered ? { duration: reduce ? 0.01 : 1.1, ease: [0.5, 0, 0.75, 0] } : { duration: reduce ? 0.01 : 0.9, ease: [0.2, 0.8, 0.2, 1] }}
+                style={{ position: "absolute", left: "50%", bottom: "-4%", x: "-50%", width: "min(330px, 62vw)", aspectRatio: "9 / 18.5" }}
+            >
+                <div style={{ position: "absolute", inset: 0, borderRadius: 38, border: "9px solid #0a0a0d", background: NIGHT, overflow: "hidden", boxShadow: `0 0 90px rgba(110,123,255,.35)` }}>
+                    <div style={{ padding: "14px 12px", color: TEXT }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 99, background: "rgba(255,255,255,.2)", border: "1.5px solid #fff" }} />
+                            <span style={{ fontWeight: 700, fontSize: 12 }}>@{handle}</span>
+                        </div>
+                        <div style={{ position: "relative", aspectRatio: "4 / 3", borderRadius: 10, overflow: "hidden" }}>
+                            <PostArt kind="dropout" />
+                        </div>
+                        <p style={{ fontSize: 12, fontWeight: 600, margin: "8px 0 10px" }}>{caption}</p>
+                        <div style={{ fontSize: 11, color: "#9a9da8", fontWeight: 700, marginBottom: 6 }}>{fmt(likes)} comments</div>
+                        <div style={{ height: 230, overflow: "hidden", position: "relative" }}>
+                            <motion.div animate={reduce ? {} : { y: [0, -260] }} transition={{ duration: 7, ease: "linear" }}>
+                                {POV_STREAM.map((c, i) => (
+                                    <div key={i} style={{ display: "flex", gap: 8, padding: "6px 4px" }}>
+                                        <span style={{ width: 18, height: 18, borderRadius: 99, background: `hsl(${210 + i * 17} 8% ${28 + (i % 4) * 8}%)`, flexShrink: 0 }} />
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontSize: 10, color: "#9a9da8" }}>@{c.h}</div>
+                                            <div style={{ fontSize: 12 }}>{c.t}</div>
+                                        </div>
+                                        <span style={{ color: "#6c6f7a", fontSize: 9, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                                            <Icon name="heart" size={11} />
+                                            {fmt(c.n)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </motion.div>
+                        </div>
+                    </div>
+                </div>
+                <svg viewBox="0 0 520 300" aria-hidden="true" style={{ position: "absolute", left: "-30%", width: "160%", top: "55%", height: "70%", overflow: "visible" }} preserveAspectRatio="none">
+                    <path d="M40 300 C50 262 110 244 200 247 L360 247 C430 250 480 270 492 300 Z" fill="#2a2230" />
+                    <path d="M72 290 C60 226 92 170 152 160 L382 150 C442 152 470 202 468 290 Z" fill={skin} />
+                    <path d="M152 160 L382 150" stroke={shade} strokeWidth="3" opacity=".5" />
+                    <path d="M86 252 C70 200 80 150 106 116 C120 98 142 102 144 122 C146 142 130 172 128 212 Z" fill={skin} stroke={shade} strokeWidth="3" />
+                    {[0, 1, 2].map((i) => (
+                        <rect key={i} x="406" y={72 + i * 42} width="54" height="36" rx="18" fill={skin} stroke={shade} strokeWidth="3" />
+                    ))}
+                </svg>
+            </motion.div>
+
+            {/* inner thought */}
+            <div aria-live="polite" style={{ position: "absolute", left: 0, right: 0, top: "34%", textAlign: "center", padding: "0 24px", pointerEvents: "none" }}>
+                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line >= 1 ? 1 : 0, y: line >= 1 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(32px, 4.6vw, 56px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.8)" }}>
+                    You don’t even know me.
+                </motion.p>
+                <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: line >= 2 ? 0.8 : 0, y: line >= 2 ? 0 : 8 }} transition={{ duration: 0.9 }} className="serif" style={{ margin: "10px 0 0", fontStyle: "italic", fontSize: "clamp(22px, 3vw, 34px)", color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.8)" }}>
+                    …and you’ve already decided.
+                </motion.p>
+            </div>
+        </div>
+    )
+}
+
+/* ───────────────────────── Top bar ───────────────────────── */
+
+function TopBar(props: { progress: number; onBack: () => void; onSkip?: () => void }) {
+    const { progress, onBack, onSkip } = props
+    const names = ["Watch", "Live", "Watched", "Reflect"]
+    const box: CSSProperties = { width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center", color: TEXT, background: "rgba(12,12,16,.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,.12)", pointerEvents: "auto" }
+    return (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", pointerEvents: "none" }}>
+            <button onClick={onBack} aria-label="Back to feed" style={box}>
+                <Icon name="back" />
+            </button>
+            <ol aria-label="Progress" style={{ display: "flex", gap: 8, listStyle: "none", margin: 0, padding: "6px 12px", alignItems: "center", borderRadius: 999, background: "rgba(12,12,16,.55)", backdropFilter: "blur(8px)" }}>
+                {names.map((n, i) => (
+                    <li key={n} aria-current={i === progress ? "step" : undefined} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ display: "block", width: 8, height: 8, borderRadius: 2, background: i === progress ? BLUE_GLOW : i < progress ? TEXT : "rgba(243,237,228,.25)" }} />
+                        {i === progress ? (
+                            <span className="px" style={{ color: TEXT, fontSize: 19, textTransform: "uppercase" }}>
+                                {n}
+                            </span>
+                        ) : (
+                            <span style={srOnly}>{n}</span>
+                        )}
+                    </li>
+                ))}
+            </ol>
+            <div style={{ width: 44, height: 44 }}>
+                {onSkip && (
+                    <button onClick={onSkip} aria-label="Skip" style={box}>
+                        <Icon name="skip" size={18} />
+                    </button>
+                )}
+            </div>
+        </div>
+    )
+}
+
+/* ───────────────────────── Feed (inside the phone) ───────────────────────── */
+
+function Feed(props: { handle: string; caption: string; storyLiked: boolean; onStoryLike: () => void; onComments: () => void; done: boolean; onReplay: () => void }) {
+    const { handle, caption, storyLiked, onStoryLike, onComments, done, onReplay } = props
+    return (
+        <div className="scroll" style={{ position: "absolute", inset: 0, background: NIGHT }}>
+            <div style={{ padding: "16px 14px 40px" }}>
+                <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Bitmap map={EYE} size={24} color={TEXT} />
+                        <span className="px" style={{ fontSize: 24, textTransform: "uppercase" }}>
+                            The Other Side
+                        </span>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: TEXT, borderBottom: `2px solid ${BLUE_GLOW}`, paddingBottom: 2 }}>For you</span>
+                </header>
+
+                <AnimatePresence>
+                    {done && (
+                        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ marginBottom: 14, borderRadius: 16, padding: 16, background: "#1a1d26", border: "1px solid rgba(255,255,255,.08)", display: "flex", alignItems: "center", gap: 12 }}>
+                            <p className="serif" style={{ margin: 0, fontSize: 22, lineHeight: 1.1, fontStyle: "italic", flex: 1 }}>
+                                Everyone is more than the moment you saw.
+                            </p>
+                            <button onClick={onReplay} aria-label="Play again" className="ghost" style={{ width: 46, padding: 0, flexShrink: 0, borderRadius: 999 }}>
+                                <Icon name="replay" size={20} />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <StoryCard art="dropout" handle={handle} caption={caption} likes={2100000 + (storyLiked ? 1 : 0)} comments={18400} liked={storyLiked} onLike={onStoryLike} onComments={onComments} badge={done ? "Seen the other side" : undefined} />
+                <StoryCard art="read" handle="exhibit_002" caption="left everyone on read for 3 months" likes={984000} comments={7200} locked />
+                <StoryCard art="walked" handle="exhibit_003" caption="she just walked out??" likes={1400000} comments={12900} locked />
+            </div>
+        </div>
+    )
+}
+
+function StoryCard(props: { art: ArtKind; handle: string; caption: string; likes: number; comments: number; liked?: boolean; onLike?: () => void; onComments?: () => void; locked?: boolean; badge?: string }) {
+    const { art, handle, caption, likes, comments, liked, onLike, onComments, locked, badge } = props
+    return (
+        <article aria-label={`Post by ${handle}`} style={{ position: "relative", aspectRatio: "4 / 5", overflow: "hidden", marginBottom: 14, borderRadius: 16, background: "#000" }}>
+            <div style={{ position: "absolute", inset: 0, filter: locked ? "grayscale(.7) blur(3px) brightness(.6)" : undefined }}>
+                <PostArt kind={art} />
+            </div>
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,0) 28%, rgba(0,0,0,0) 55%, rgba(0,0,0,.75) 100%)" }} />
+            <div style={{ position: "absolute", top: 12, left: 12, display: "flex", alignItems: "center", gap: 8, color: "#fff" }}>
+                <span style={{ width: 28, height: 28, borderRadius: 99, background: "rgba(255,255,255,.18)", border: "1.5px solid #fff" }} />
+                <span style={{ fontWeight: 700, fontSize: 14 }}>@{handle}</span>
+            </div>
+            {!locked && (
+                <span className="px" style={{ position: "absolute", top: 14, right: 14, color: "#fff", fontSize: 18, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="blink" style={{ width: 8, height: 8, borderRadius: 99, background: "#ff4b4b" }} /> REC 00:10
+                </span>
+            )}
+            {badge && (
+                <span style={{ position: "absolute", top: 48, right: 12, background: BLUE, color: "#fff", borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{badge}</span>
+            )}
+            {locked && (
+                <span className="px" style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,.5)", color: "#fff", padding: "2px 10px", borderRadius: 999, fontSize: 18, display: "flex", gap: 6, alignItems: "center" }}>
+                    <Icon name="lock" size={13} /> SOON
+                </span>
+            )}
+            <p style={{ position: "absolute", left: 14, right: 76, bottom: 16, margin: 0, color: "#fff", fontSize: 15, fontWeight: 600, lineHeight: 1.35 }}>{caption}</p>
+            {!locked && (
+                <div style={{ position: "absolute", right: 10, bottom: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <button className="rail-btn" onClick={onLike} aria-pressed={!!liked} aria-label={liked ? "Unlike post" : "Like post"}>
+                        <motion.span className="ic" animate={liked ? { scale: [1, 1.2, 1] } : { scale: 1 }} style={{ color: liked ? BLUE_GLOW : "#fff" }}>
+                            <Icon name="heart" fill={!!liked} />
+                        </motion.span>
+                        {fmt(likes)}
+                    </button>
+                    <button className="rail-btn" onClick={onComments} aria-label={`Open ${fmt(comments)} comments`}>
+                        <span className="ic">
+                            <Icon name="comment" />
+                        </span>
+                        {fmt(comments)}
+                    </button>
+                    <span className="rail-btn" aria-hidden="true">
+                        <span className="ic">
+                            <Icon name="share" />
+                        </span>
+                        Share
+                    </span>
+                </div>
+            )}
+        </article>
+    )
+}
+
+function Drawer(props: { open: boolean; onClose: () => void; liked: string | null; onLike: (id: string) => void; showCoach: boolean; mine: string | null; reduce: boolean }) {
+    const { open, onClose, liked, onLike, showCoach, mine, reduce } = props
+    return (
+        <AnimatePresence>
+            {open && (
+                <>
+                    <motion.div key="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 10 }} />
+                    <motion.section
+                        key="sheet"
+                        role="dialog"
+                        aria-label="Comments"
+                        initial={{ y: reduce ? 0 : "100%", opacity: reduce ? 0 : 1 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: reduce ? 0 : "100%", opacity: reduce ? 0 : 1 }}
+                        transition={{ type: "spring", damping: 32, stiffness: 320 }}
+                        style={{ position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "78%", background: "#171a22", borderRadius: "20px 20px 0 0", zIndex: 11, display: "flex", flexDirection: "column", borderTop: "1px solid rgba(255,255,255,.08)" }}
+                    >
+                        <div style={{ width: 36, height: 4, borderRadius: 4, background: "rgba(255,255,255,.25)", margin: "8px auto 0" }} />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px 4px 18px" }}>
+                            <span style={{ fontWeight: 700, fontSize: 15 }}>18.4K comments</span>
+                            <button onClick={onClose} aria-label="Close comments" style={{ width: 44, height: 44, display: "grid", placeItems: "center", borderRadius: 99 }}>
+                                <Icon name="x" size={18} />
+                            </button>
+                        </div>
+                        {!mine && (
+                            <div style={{ margin: "2px 12px 8px", padding: "12px 14px", borderRadius: 14, background: "rgba(51,70,255,.14)", border: `1px solid rgba(110,123,255,.45)` }}>
+                                <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.2 }}>Which comment do you agree with?</div>
+                                <div style={{ fontSize: 13, color: "#c5c8d6", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ color: BLUE_GLOW, display: "grid" }}>
+                                        <Icon name="heart" size={14} fill />
+                                    </span>
+                                    Like just one.
+                                </div>
+                            </div>
+                        )}
+                        <div className="scroll" style={{ padding: "0 6px 24px" }}>
+                            {mine && (
+                                <div style={{ display: "flex", gap: 12, padding: 12, margin: "0 6px 6px", borderRadius: 14, background: "rgba(51,70,255,.16)", border: `1px solid ${BLUE}` }}>
+                                    <span style={{ width: 34, height: 34, borderRadius: 99, background: BLUE, flexShrink: 0, display: "grid", placeItems: "center" }}>
+                                        <Bitmap map={EYE} size={20} color="#fff" />
+                                    </span>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: BLUE_GLOW }}>you · after</div>
+                                        <p style={{ margin: "3px 0 0", fontSize: 15, lineHeight: 1.35 }}>{mine}</p>
+                                    </div>
+                                </div>
+                            )}
+                            {COMMENTS.map((c, i) => {
+                                const isLiked = liked === c.id
+                                return (
+                                    <div key={c.id} style={{ position: "relative", display: "flex", gap: 12, padding: 12, alignItems: "flex-start" }}>
+                                        <span aria-hidden="true" style={{ width: 34, height: 34, borderRadius: 99, background: `hsl(${220 + i * 25} 10% ${30 + i * 6}%)`, flexShrink: 0 }} />
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 12, fontWeight: 600, color: "#9a9da8" }}>@{c.handle}</div>
+                                            <p style={{ margin: "3px 0 0", fontSize: 15, lineHeight: 1.35 }}>{c.text}</p>
+                                        </div>
+                                        <button className="cmt-heart" onClick={() => onLike(c.id)} aria-pressed={isLiked} aria-label={`Like: ${c.text}`} style={{ color: isLiked ? BLUE_GLOW : !liked && !mine ? "#c5c8d6" : undefined }}>
+                                            <motion.span animate={isLiked && !reduce ? { scale: [1, 1.5, 1] } : !liked && !mine && !reduce && showCoach ? { scale: [1, 1.15, 1] } : {}} transition={{ duration: 0.35 }} style={{ display: "grid" }}>
+                                                <Icon name="heart" size={20} fill={isLiked} />
+                                            </motion.span>
+                                            {fmt(c.likes + (isLiked ? 1 : 0))}
+                                        </button>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </motion.section>
+                </>
+            )}
+        </AnimatePresence>
+    )
+}
+
+/* ───────────────────────── Room ───────────────────────── */
+
+function Room(props: { beat: number; visited: ObjId[]; target: ObjId | null; hint: ObjId | null; onOpen: (id: ObjId) => void; reduce: boolean; flash: string | null }) {
+    const { beat, visited, target, hint, onOpen, reduce, flash } = props
+    const wrapRef = useRef<HTMLDivElement>(null)
+    const box = useBox(wrapRef)
+    const [pan, setPan] = useState(0)
+    const [par, setPar] = useState({ x: 0, y: 0 })
+    const drag = useRef<{ x: number; p: number; moved: boolean } | null>(null)
+
+    const scale = Math.max(box.w / 1600, box.h / 900)
+    const sw = 1600 * scale
+    const sh = 900 * scale
+    const maxPan = Math.max(0, (sw - box.w) / 2)
+
+    const focus = hint || target
+    useEffect(() => {
+        if (!focus || maxPan <= 0) return
+        const objX = (OBJECTS[focus].x / 100) * sw - sw / 2
+        setPan(clamp(-objX, -maxPan, maxPan))
+    }, [focus, maxPan, sw])
+
+    const onMove = (e: RPointerEvent) => {
+        if (drag.current) {
+            const dx = e.clientX - drag.current.x
+            if (Math.abs(dx) > 5) drag.current.moved = true
+            setPan(clamp(drag.current.p + dx, -maxPan, maxPan))
+            return
+        }
+        if (reduce || e.pointerType !== "mouse") return
+        const r = wrapRef.current?.getBoundingClientRect()
+        if (!r) return
+        setPar({ x: ((e.clientX - r.left) / r.width - 0.5) * -22, y: ((e.clientY - r.top) / r.height - 0.5) * -12 })
+    }
+
+    const dust = useMemo(() => Array.from({ length: 16 }).map((_, i) => ({ l: 20 + hash(i, 1, 7) * 70, t: 30 + hash(i, 2, 7) * 60, d: hash(i, 3, 7) * 9 })), [])
+
+    return (
+        <div
+            ref={wrapRef}
+            onPointerMove={onMove}
+            onPointerDown={(e) => {
+                if (maxPan > 0 && e.pointerType !== "mouse") drag.current = { x: e.clientX, p: pan, moved: false }
+            }}
+            onPointerUp={() => (drag.current = null)}
+            onPointerCancel={() => (drag.current = null)}
+            style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#120d0f", touchAction: maxPan > 0 ? "pan-y" : "auto" }}
+        >
+            <motion.div animate={{ x: pan + par.x, y: par.y }} transition={{ type: "tween", ease: "easeOut", duration: 0.5 }} style={{ position: "absolute", left: (box.w - sw) / 2, top: (box.h - sh) / 2, width: sw, height: sh }}>
+                <RoomSVG beat={beat} buzz={target === "phone"} />
+                {beat >= 2 && (
+                    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                        {CROWD.slice(0, 3).map((c, i) => (
+                            <span key={c.t} className="px" style={{ position: "absolute", left: `${[13, 24, 8][i]}%`, top: `${[17, 30, 40][i]}%`, color: BLUE_GLOW, opacity: 0.75, fontSize: 18, textShadow: `0 0 10px ${BLUE}` }}>
+                                {c.t}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {/* how it looks from outside: a stranger's take flashes on the glass */}
+                <AnimatePresence>
+                    {flash && (
+                        <motion.div
+                            key={flash}
+                            role="status"
+                            initial={{ opacity: 0, scale: reduce ? 1 : 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ delay: reduce ? 0 : 0.5, duration: 0.4 }}
+                            style={{ position: "absolute", left: "9.5%", top: "20%", width: "22%", zIndex: 2, pointerEvents: "none", padding: "8px 12px", borderRadius: 12, background: "rgba(14,16,26,.82)", border: `1px solid ${BLUE_GLOW}`, boxShadow: `0 0 26px rgba(51,70,255,.55)`, color: "#fff" }}
+                        >
+                            <div style={{ fontSize: 11, color: "#a9aec8", fontWeight: 700 }}>@stranger · just now</div>
+                            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>{flash}</div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+                {(Object.keys(OBJECTS) as ObjId[]).map((id) => {
+                    const o = OBJECTS[id]
+                    const isTarget = target === id || hint === id
+                    const seen = visited.includes(id) && !isTarget
+                    return (
+                        <button key={id} className={`hot${isTarget ? " target" : ""}${seen ? " seen" : ""}`} onClick={() => !drag.current?.moved && onOpen(id)} aria-label={o.label} style={{ left: `${o.x}%`, top: `${o.y}%`, zIndex: 3 }}>
+                            <span className="ring" />
+                            <span className="dot" />
+                            <span className="lbl">{o.label}</span>
+                        </button>
+                    )
+                })}
+            </motion.div>
+            {!reduce &&
+                dust.map((d, i) => <span key={i} className="dust" aria-hidden="true" style={{ left: `${d.l}%`, top: `${d.t}%`, animationDelay: `${d.d}s` }} />)}
+            <div className="vignette" />
+            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                <div className="grain" />
+            </div>
+        </div>
+    )
+}
+
+/* ───────────────────────── Watched overlay ───────────────────────── */
+
+function WatchedOverlay(props: { step: number; picks: Option[]; liked: Comment | null; watchers: number; reduce: boolean; onNext: () => void }) {
+    const { step, picks, liked, watchers, reduce, onNext } = props
+    const crowd = useMemo(() => (liked ? [{ h: liked.handle, t: liked.text }, ...CROWD] : CROWD), [liked])
+    const winPos: CSSProperties[] = [
+        { left: "4%", top: "16%" },
+        { right: "4%", top: "24%" },
+        { left: "6%", bottom: "20%" },
+    ]
+    const cmtPos: CSSProperties[] = [
+        { right: "6%", bottom: "22%" },
+        { left: "36%", top: "13%" },
+        { right: "30%", bottom: "12%" },
+        { left: "3%", top: "46%" },
+        { right: "3%", top: "52%" },
+        { left: "30%", bottom: "8%" },
+        { left: "54%", top: "18%" },
+    ]
+    const crowdOn = step >= 2 && step < 4
+    return (
+        <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: step >= 1 && step < 4 ? 1 : 0 }} className="px" style={{ position: "absolute", top: 74, left: "50%", x: "-50%", display: "flex", gap: 10, alignItems: "center", fontSize: 24, whiteSpace: "nowrap", color: "#fff", background: "rgba(10,12,18,.6)", padding: "2px 14px", borderRadius: 8 }}>
+                <span className="blink" style={{ width: 10, height: 10, borderRadius: 99, background: BLUE_GLOW, boxShadow: `0 0 10px ${BLUE}` }} />
+                LIVE · {(1204331 + watchers * 18240).toLocaleString("en-US")} WATCHING
+            </motion.div>
+
+            <AnimatePresence>
+                {crowdOn &&
+                    picks.map((p, i) => (
+                        <motion.div key={p.id} initial={{ opacity: 0, scale: reduce ? 1 : 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, transition: { duration: 0.5 } }} transition={{ delay: reduce ? 0 : i * 0.3, type: "spring", stiffness: 380, damping: 22 }} style={{ position: "absolute", ...winPos[i], width: "min(330px, 62vw)", zIndex: 4 }}>
+                            <Win title="⚠ Breaking" alert>
+                                <p className="px" style={{ margin: 0, fontSize: 28, lineHeight: 0.95, textTransform: "uppercase" }}>
+                                    {p.head}
+                                </p>
+                            </Win>
+                        </motion.div>
+                    ))}
+                {crowdOn &&
+                    step >= 3 &&
+                    crowd.slice(0, 7).map((c, i) => (
+                        <motion.div
+                            key={"c" + c.h + i}
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, transition: { duration: 0.5 } }}
+                            transition={{ delay: reduce ? 0 : i * 0.1 }}
+                            style={{ position: "absolute", ...cmtPos[i], background: "rgba(16,18,24,.85)", color: "#fff", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, padding: "7px 12px", maxWidth: 280, zIndex: 5, boxShadow: "0 8px 20px rgba(0,0,0,.4)" }}
+                        >
+                            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>@{c.h}</div>
+                            <div style={{ fontSize: 15, fontWeight: 600 }}>{c.t}</div>
+                        </motion.div>
+                    ))}
+            </AnimatePresence>
+
+            {/* the last window to light up is yours */}
+            <AnimatePresence>
+                {step >= 4 && (
+                    <motion.div key="yours" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduce ? 0 : 1.4, duration: 0.8 }} style={{ position: "absolute", left: 0, right: 0, bottom: "12%", textAlign: "center", padding: "0 20px" }}>
+                        <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
+                            One of those likes was yours.
+                        </p>
+                        {liked && (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 14, padding: "7px 14px", borderRadius: 999, background: BLUE, color: "#fff", fontSize: 15, fontWeight: 600, boxShadow: `0 0 30px ${BLUE}` }}>
+                                <Icon name="heart" size={15} fill />
+                                {liked.text}
+                            </span>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {step >= 5 && (
+                <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onClick={onNext} aria-label="Continue" className="btn" style={{ position: "absolute", right: 24, bottom: 24, zIndex: 12, pointerEvents: "auto", width: 52, padding: 0, borderRadius: 99 }}>
+                    <Icon name="next" size={20} />
+                </motion.button>
+            )}
+        </div>
+    )
+}
+
+/* ───────────────────────── Epilogue: your words arrive ───────────────────────── */
+
+function Epilogue(props: { step: number; comment: string; kept: boolean; reduce: boolean; onFeed: () => void }) {
+    const { step, comment, kept, reduce, onFeed } = props
+    return (
+        <div aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+            <AnimatePresence>
+                {step >= 1 && (
+                    <motion.div
+                        key="reply"
+                        initial={{ y: reduce ? 0 : -30, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: reduce ? 0 : 1.2, type: "spring", stiffness: 240, damping: 24 }}
+                        className="glass"
+                        style={{ position: "absolute", top: "14%", left: "50%", x: "-50%", width: "min(400px, calc(100% - 32px))", display: "flex", gap: 12, padding: 12, borderRadius: 20, background: "rgba(28,30,38,.88)" }}
+                    >
+                        <span style={{ width: 40, height: 40, borderRadius: 10, background: BLUE, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                            <Bitmap map={EYE} size={24} color="#fff" />
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#a8abb6" }}>
+                                <span>@room017 · new reply</span>
+                                <span>now</span>
+                            </span>
+                            <span style={{ display: "block", fontSize: 15, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>{comment}</span>
+                        </span>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            <AnimatePresence>
+                {step >= 3 && (
+                    <motion.div key="close" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9 }} style={{ position: "absolute", left: 0, right: 0, bottom: "10%", textAlign: "center", padding: "0 20px" }}>
+                        <p className="serif" style={{ margin: 0, fontStyle: "italic", fontSize: "clamp(30px, 4.4vw, 54px)", lineHeight: 1.05, color: TEXT, textShadow: "0 2px 30px rgba(0,0,0,.9)" }}>
+                            {kept ? "Words stay longer than the moment." : "Everyone is more than the moment you saw."}
+                        </p>
+                        <button onClick={onFeed} className="btn" style={{ marginTop: 22, pointerEvents: "auto" }}>
+                            Back to the feed <Icon name="next" size={18} />
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    )
+}
+
+/* ───────────────────────── HUD ───────────────────────── */
+
+function Bar(props: { v: number }) {
+    return (
+        <span aria-hidden="true" style={{ width: 60, height: 6, borderRadius: 99, background: "rgba(255,255,255,.15)", overflow: "hidden", display: "inline-block" }}>
+            <motion.span animate={{ width: `${props.v}%` }} style={{ display: "block", height: "100%", background: TEXT, borderRadius: 99 }} />
+        </span>
+    )
+}
+
+function Hud(props: { stats: Stats; clock: string }) {
+    const { stats, clock } = props
+    const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(14,11,13,.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,235,210,.12)", borderRadius: 10, padding: "0 12px", fontSize: 21, color: TEXT, height: 36 }
+    return (
+        <div role="status" aria-label={`${clock}. Money $${stats.money} of $640 rent. Energy ${stats.energy}. Grades ${stats.grade}.`} className="px" style={{ position: "absolute", top: 70, left: 16, zIndex: 5, display: "flex", flexWrap: "wrap", gap: 8, maxWidth: "calc(100% - 32px)" }}>
+            <span style={chip}>{clock}</span>
+            <span style={chip}>
+                <span style={{ opacity: 0.6 }}>RENT</span>
+                <span style={{ color: stats.money < 640 ? AMBER : TEXT }}>${stats.money}</span>
+                <span style={{ opacity: 0.5 }}>/640</span>
+            </span>
+            <span style={chip}>
+                <span style={{ opacity: 0.6 }}>EXAM</span> FRI 9AM
+            </span>
+            <span style={chip} title="Energy">
+                ⚡ <Bar v={stats.energy} />
+            </span>
+            <span style={chip} title="Grades">
+                A+ <Bar v={stats.grade} />
+            </span>
+        </div>
+    )
+}
+
+/* ───────────────────────── Object card ───────────────────────── */
+
+function Delta(props: { d: Partial<Stats> }) {
+    const items: { k: string; v: number; icon: string }[] = []
+    if (props.d.money) items.push({ k: "money", v: props.d.money, icon: "$" })
+    if (props.d.energy) items.push({ k: "energy", v: props.d.energy, icon: "⚡" })
+    if (props.d.grade) items.push({ k: "grade", v: props.d.grade, icon: "A+" })
+    return (
+        <div className="px" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {items.map((it) => (
+                <span key={it.k} style={{ fontSize: 21, padding: "0 10px", borderRadius: 8, background: it.v > 0 ? "rgba(255,255,255,.12)" : "rgba(255,140,90,.16)", color: it.v > 0 ? TEXT : "#FFB08A" }}>
+                    {it.icon} {it.v > 0 ? "+" : "−"}
+                    {Math.abs(it.v)}
+                </span>
+            ))}
+        </div>
+    )
+}
+
+function ObjectCard(props: { open: ObjId | null; beat: number; stats: Stats; outcome: Option | null; onChoose: (o: Option) => void; onClose: () => void; onNext: () => void; reduce: boolean }) {
+    const { open, beat, stats, outcome, onChoose, onClose, onNext, reduce } = props
+    const isBeat = open !== null && beat < 3 && BEATS[beat].obj === open
+    const firstRef = useRef<HTMLButtonElement>(null)
+    useEffect(() => {
+        if (!open) return
+        const t = window.setTimeout(() => firstRef.current?.focus(), 30)
+        return () => window.clearTimeout(t)
+    }, [open, outcome])
+    useEffect(() => {
+        if (!outcome) return
+        const t = window.setTimeout(onNext, reduce ? 3400 : 2800)
+        return () => window.clearTimeout(t)
+    }, [outcome])
+
+    return (
+        <AnimatePresence>
+            {open && (
+                <motion.div
+                    key={open + String(beat)}
+                    role="dialog"
+                    aria-labelledby="tos-card-title"
+                    className="glass"
+                    initial={{ opacity: 0, y: reduce ? 0 : 24 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: reduce ? 0 : 16 }}
+                    transition={{ duration: 0.25 }}
+                    style={{ position: "absolute", left: "50%", bottom: 22, x: "-50%", width: "min(560px, calc(100% - 32px))", zIndex: 8, padding: 20, color: TEXT }}
+                >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <span id="tos-card-title" className="px" style={{ fontSize: 19, letterSpacing: ".1em", opacity: 0.7, textTransform: "uppercase" }}>
+                            {OBJECTS[open].label}
+                        </span>
+                        {!isBeat && !outcome && (
+                            <button ref={firstRef} onClick={onClose} aria-label="Close" style={{ width: 36, height: 36, display: "grid", placeItems: "center", borderRadius: 99, background: "rgba(255,255,255,.08)" }}>
+                                <Icon name="x" size={16} />
+                            </button>
+                        )}
+                    </div>
+                    {outcome ? (
+                        <div>
+                            <p style={{ margin: "0 0 14px", fontSize: 21, fontWeight: 700, lineHeight: 1.3 }}>{outcome.out}</p>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                                <Delta d={outcome.d} />
+                                <button ref={firstRef} onClick={onNext} aria-label="Continue" className="btn" style={{ width: 48, padding: 0, borderRadius: 99, flexShrink: 0 }}>
+                                    <Icon name="next" size={18} />
+                                </button>
+                            </div>
+                        </div>
+                    ) : isBeat ? (
+                        <div>
+                            <p style={{ margin: "0 0 16px", fontSize: 22, fontWeight: 700, lineHeight: 1.3 }}>{BEATS[beat].prompt(stats)}</p>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                {BEATS[beat].options.map((o, i) => (
+                                    <button key={o.id} ref={i === 0 ? firstRef : undefined} className="ghost" onClick={() => onChoose(o)}>
+                                        {o.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <p style={{ margin: 0, fontSize: 21, fontWeight: 600, lineHeight: 1.35 }}>{OBJECTS[open].info}</p>
+                    )}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    )
+}
+
+/* ───────────────────────── Reveal ───────────────────────── */
+
+function Reveal(props: { caption: string; handle: string; liked: Comment | null; visited: ObjId[]; picks: Option[]; onNext: () => void; reduce: boolean }) {
+    const { caption, handle, liked, visited, picks, onNext, reduce } = props
+    const [step, setStep] = useState(reduce ? 3 : 0)
+    useEffect(() => {
+        if (reduce) return
+        const ts = [700, 2000, 3200].map((ms, i) => window.setTimeout(() => setStep(i + 1), ms))
+        return () => ts.forEach((t) => window.clearTimeout(t))
+    }, [reduce])
+    const seen = (Object.keys(OBJECTS) as ObjId[]).filter((o) => visited.includes(o) || o === liked?.evidence)
+    const story = [...seen.map((o) => OBJECTS[o].seen), ...picks.map((p) => p.out)].join(" ")
+
+    return (
+        <div className="scroll" onClick={() => step < 3 && setStep(3)} style={{ position: "absolute", inset: 0, background: NIGHT }}>
+            <div style={{ minHeight: "100%", display: "flex", flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 360px", minHeight: 460, display: "grid", placeItems: "center", padding: "84px 24px 48px", position: "relative", background: "radial-gradient(circle at 50% 55%, rgba(255,184,103,.22), transparent 60%)" }}>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ height: "min(68vh, 560px)", aspectRatio: "260 / 400" }}>
+                        <TextFigure text={story} fg={PAPER} ink="#3a2a1e" label={`What only you saw: ${story}`} style={{ width: "100%", height: "100%" }} />
+                    </motion.div>
+                    <span className="px" style={{ position: "absolute", left: 24, bottom: 18, fontSize: 19, color: AMBER, textTransform: "uppercase" }}>
+                        [ What you saw ]
+                    </span>
+                </div>
+
+                <div style={{ flex: "1 1 360px", padding: "84px clamp(20px, 5vw, 64px) 40px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 22, borderLeft: "1px solid rgba(255,255,255,.06)" }}>
+                    <motion.h1 initial={{ opacity: 0 }} animate={{ opacity: step >= 1 ? 1 : 0 }} transition={{ duration: 0.01 }} className="px" style={{ fontSize: "clamp(64px, 9vw, 120px)", fontWeight: 400, lineHeight: 0.82, margin: 0, textTransform: "uppercase" }}>
+                        You were both.
+                    </motion.h1>
+                    <motion.p initial={{ opacity: 0 }} animate={{ opacity: step >= 2 ? 1 : 0 }} className="serif" style={{ fontSize: "clamp(26px, 3vw, 34px)", fontStyle: "italic", lineHeight: 1.1, margin: 0, color: "#d8d2c8" }}>
+                        The one watching. And the one being watched.
+                    </motion.p>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: step >= 3 ? 1 : 0 }} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                        <Win title={`@${handle}`} style={{ maxWidth: 420 }}>
+                            <p style={{ margin: "0 0 10px", fontWeight: 700, fontSize: 16 }}>{caption}</p>
+                            {liked && (
+                                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: BLUE, color: "#fff", padding: "8px 10px" }}>
+                                    <span style={{ display: "grid", paddingTop: 2 }}>
+                                        <Icon name="heart" size={16} fill />
+                                    </span>
+                                    <span style={{ fontSize: 15, fontWeight: 600 }}>{liked.text}</span>
+                                </div>
+                            )}
+                        </Win>
+                        <div>
+                            <div className="px" style={{ fontSize: 19, opacity: 0.6, marginBottom: 6 }}>
+                                [ THEY SAW ]
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {picks.map((p) => (
+                                    <span key={p.id} className="px" style={{ fontSize: 19, padding: "0 8px", border: "1px solid rgba(243,237,228,.5)", borderRadius: 4 }}>
+                                        {p.head}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onNext()
+                                }}
+                                className="btn"
+                            >
+                                Back to your comment <Icon name="next" size={18} />
+                            </button>
+                        </div>
+                    </motion.div>
+                    <p className="px" style={{ margin: "8px 0 0", fontSize: 18, opacity: 0.55, textTransform: "uppercase" }}>
+                        Everyone has an opinion. Until they’re the one being watched.
+                    </p>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+/* ───────────────────────── Reflect ───────────────────────── */
+
+function Reflect(props: { phase: Phase; liked: Comment | null; draft: string; setDraft: (s: string) => void; onKeep: () => void; onRewrite: () => void; onPost: () => void }) {
+    const { phase, liked, draft, setDraft, onKeep, onRewrite, onPost } = props
+    const taRef = useRef<HTMLTextAreaElement>(null)
+    useEffect(() => {
+        if (phase === "rewrite") taRef.current?.focus()
+    }, [phase])
+    return (
+        <div className="scroll" style={{ position: "absolute", inset: 0 }}>
+            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+                <div className="grain" />
+            </div>
+            <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "84px 20px 40px", position: "relative" }}>
+                <div style={{ width: "min(580px, 100%)" }}>
+                    {phase === "reflect" ? (
+                        <>
+                            <h2 className="px" style={{ fontSize: "clamp(64px, 10vw, 112px)", fontWeight: 400, lineHeight: 0.85, margin: "0 0 26px", textTransform: "uppercase" }}>
+                                Still agree?
+                            </h2>
+                            <Win title="♥ You liked this">
+                                <p className="serif" style={{ margin: "0 0 18px", fontSize: 32, fontStyle: "italic", lineHeight: 1.1 }}>
+                                    “{liked?.text}”
+                                </p>
+                                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                                    <button className="btn" onClick={onRewrite}>
+                                        Rewrite it
+                                    </button>
+                                    <button className="ghost ink" onClick={onKeep}>
+                                        Keep it
+                                    </button>
+                                </div>
+                            </Win>
+                        </>
+                    ) : (
+                        <>
+                            <div className="serif" aria-hidden="true" style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", fontStyle: "italic", fontSize: 30, marginBottom: 20 }}>
+                                <span>is it true?</span>
+                                <span style={{ color: BLUE_GLOW, transform: "translateY(-10px)" }}>is it kind?</span>
+                                <span>is it necessary?</span>
+                            </div>
+                            <Win title="New comment">
+                                <label htmlFor="tos-draft" style={srOnly}>
+                                    Rewrite your comment. Is it true, kind, necessary?
+                                </label>
+                                <textarea
+                                    id="tos-draft"
+                                    ref={taRef}
+                                    value={draft}
+                                    maxLength={140}
+                                    onChange={(e) => setDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) {
+                                            e.preventDefault()
+                                            onPost()
+                                        }
+                                    }}
+                                    rows={3}
+                                    style={{ width: "100%", padding: "14px 16px", border: `2px solid ${INK}`, background: "#fff", fontSize: 20, lineHeight: 1.35, resize: "none", fontFamily: "inherit", color: INK }}
+                                />
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+                                    <span className="px" style={{ fontSize: 20, color: "#5f5f66" }}>{draft.length}/140</span>
+                                    <button className="btn" onClick={onPost}>
+                                        Post <Icon name="send" size={16} />
+                                    </button>
+                                </div>
+                            </Win>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+addPropertyControls(TheOtherSide, {
+    storyHandle: { type: ControlType.String, title: "Handle", defaultValue: "room017" },
+    caption: { type: ControlType.String, title: "Caption", defaultValue: "dropped out at 20 lol 💀 #college" },
+    startAt: { type: ControlType.Enum, title: "Start at", options: ["intro", "feed", "pov", "room"], optionTitles: ["Intro", "Feed", "Phone POV", "Room"], defaultValue: "intro", description: "Preview only. Keep on Intro for the live site." },
+})
