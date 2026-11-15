@@ -446,6 +446,8 @@ const CSS = `
 .tos .act-bob{animation:tosBob 1.1s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-sway{animation:tosSway 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 .tos .act-nod{animation:tosNod 1.6s ease-in-out infinite;transform-box:fill-box}
+@keyframes tosBlink2{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.08)}}
+.tos .ld-blink{transform-box:fill-box;transform-origin:50% 55%;animation:tosBlink2 .26s ease-in-out 1.75s 1}
 @keyframes tosPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.25)}100%{opacity:1;transform:scale(1)}}
 @keyframes tosDust{0%{transform:translate(0,0);opacity:0}15%{opacity:.8}100%{transform:translate(30px,-120px);opacity:0}}
 .tos .blink{animation:tosBlink 1.8s ease-in-out infinite}
@@ -1391,44 +1393,52 @@ export default function TheOtherSide(props: Props) {
 
 /* ───────────────────────── Loader: a hand, a phone, in dots ───────────────────────── */
 
-const LD_COLS = 30
-const LD_ROWS = 36
+/* traced from a cross-stitch pattern of two eyes (100 × 25 cells) */
+const EYES_MAP = [
+    "..............##########...................................................................#########",
+    "........######################.........................................................############.",
+    ".....############################....................................................###########....",
+    ".########.......###################..............................................############.......",
+    "......................#################.........................................##########..........",
+    ".........................###############....................................############............",
+    ".............................##############................................##########...............",
+    ".................................###############.........................#########..................",
+    ".......................................##########......................#######......................",
+    ".........................................#########.....................####.........................",
+    "..................#########.....................##.........................##################.......",
+    ".............#####################.......................................########.############......",
+    "...........################.#######....................................##########.....########......",
+    ".........##################.....#####.................................#######.###......########.....",
+    ".......##########.######.##.......#####..............................#..#########......#########....",
+    "......###########.#########........#####............................###.#########......########.....",
+    "....#########...#..########........................................##.#..#######.......####.........",
+    ".....########...#..#######.........................................#...#..#####.......#####.........",
+    ".....#########...#...####.........................................##....##.###.......#######........",
+    ".......#########..######..........................................##................#######.........",
+    "........##########................##..............................##......#.......########..........",
+    "........#############..........#######....................................#################.........",
+    ".........##.########################.......................................##############...........",
+    "............##..###############.............................................############............",
+    ".................#.##...#...#...................................................#..#...#............",
+]
+const LD_COLS = 100
+const LD_ROWS = EYES_MAP.length
+const IRIS = [
+    { x: 24, y: 14.5, r: 4.6 },
+    { x: 77, y: 13.5, r: 4.6 },
+]
 const LOADER_CELLS = (() => {
-    const inRot = (x: number, y: number, cx: number, cy: number, w: number, h: number, deg: number) => {
-        const a = (-deg * Math.PI) / 180
-        const dx = x - cx
-        const dy = y - cy
-        const rx = dx * Math.cos(a) - dy * Math.sin(a)
-        const ry = dx * Math.sin(a) + dy * Math.cos(a)
-        return Math.abs(rx) <= w / 2 && Math.abs(ry) <= h / 2
-    }
-    const inEl = (x: number, y: number, cx: number, cy: number, rx: number, ry: number, deg = 0) => {
-        const a = (-deg * Math.PI) / 180
-        const dx = x - cx
-        const dy = y - cy
-        const ux = dx * Math.cos(a) - dy * Math.sin(a)
-        const uy = dx * Math.sin(a) + dy * Math.cos(a)
-        return (ux * ux) / (rx * rx) + (uy * uy) / (ry * ry) <= 1
-    }
-    const out: { x: number; y: number; t: "hand" | "phone" | "screen"; d: number }[] = []
-    for (let y = 0; y < LD_ROWS; y++)
+    const out: { x: number; y: number; t: "brow" | "eye" | "iris" | "glint"; d: number }[] = []
+    EYES_MAP.forEach((row, y) => {
         for (let x = 0; x < LD_COLS; x++) {
-            const px = x + 0.5
-            const py = y + 0.5
-            const phone = inRot(px, py, 15, 13, 10, 18, -16)
-            const screen = inRot(px, py, 15, 13, 7.4, 14, -16)
-            const hand =
-                inEl(px, py, 17, 25, 8.5, 6.5, -10) ||
-                inEl(px, py, 9.5, 20, 2.6, 5.6, -28) ||
-                inEl(px, py, 22, 11, 2.8, 1.7, -16) ||
-                inEl(px, py, 23, 14.5, 2.8, 1.7, -16) ||
-                inEl(px, py, 23.4, 18, 2.8, 1.7, -16) ||
-                (px > 13 && px < 25 && py > 28 && py < LD_ROWS)
-            const t = screen ? "screen" : phone ? "phone" : hand ? "hand" : null
-            if (!t) continue
-            if (t === "screen" && hash(x, y, 11) > 0.42) continue
-            out.push({ x, y, t, d: (y / LD_ROWS) * 0.7 + hash(x, y, 12) * 0.5 })
+            const on = row[x] === "#"
+            const iris = IRIS.find((c) => Math.hypot(x - c.x, y - c.y) <= c.r)
+            const glint = !on && IRIS.some((c) => Math.hypot(x - c.x, y - c.y) <= 1.8)
+            if (!on && !glint) continue
+            const t = glint && !on ? "glint" : iris ? "iris" : y < 10 ? "brow" : "eye"
+            out.push({ x, y, t, d: (x / LD_COLS) * 0.6 + hash(x, y, 12) * 0.25 })
         }
+    })
     return out
 })()
 
@@ -1448,7 +1458,7 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
         }, 40)
         return () => window.clearInterval(iv)
     }, [])
-    const C = 12
+    const C = 10
     return (
         <motion.div
             key="loader"
@@ -1471,21 +1481,25 @@ function Loader(props: { onDone: () => void; reduce: boolean }) {
                 <rect width="100%" height="100%" fill="url(#tosCross)" />
             </svg>
             <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
-                <svg viewBox={`0 0 ${LD_COLS * C} ${LD_ROWS * C}`} style={{ width: "min(300px, 60vw)", height: "auto", display: "block" }} aria-hidden="true">
-                    {LOADER_CELLS.map((c, i) => {
-                        const fill = c.t === "hand" ? "#5b6378" : c.t === "screen" ? "#dfe3ff" : BLUE_GLOW
-                        const delay = c.t === "hand" ? c.d * 0.5 : 0.45 + c.d
-                        return (
-                            <circle
-                                key={i}
-                                cx={c.x * C + C / 2}
-                                cy={c.y * C + C / 2}
-                                r={c.t === "hand" ? C * 0.42 : C * 0.4}
-                                fill={fill}
-                                style={reduce ? undefined : { opacity: 0, animation: `tosPop .28s ease-out ${delay.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}
-                            />
-                        )
-                    })}
+                <svg viewBox={`0 0 ${LD_COLS * C} ${LD_ROWS * C}`} style={{ width: "min(620px, 86vw)", height: "auto", display: "block", overflow: "visible" }} aria-hidden="true">
+                    {(["brow", "lid"] as const).map((layer) => (
+                        <g key={layer} className={layer === "lid" && !reduce ? "ld-blink" : undefined}>
+                            {LOADER_CELLS.filter((c) => (layer === "brow" ? c.t === "brow" : c.t !== "brow")).map((c, i) => {
+                                const fill = c.t === "iris" ? BLUE_GLOW : c.t === "glint" ? "#ffffff" : "#8b92a6"
+                                const delay = c.t === "iris" || c.t === "glint" ? 0.7 + c.d * 0.6 : c.d
+                                return (
+                                    <circle
+                                        key={i}
+                                        cx={c.x * C + C / 2}
+                                        cy={c.y * C + C / 2}
+                                        r={C * 0.42}
+                                        fill={fill}
+                                        style={reduce ? undefined : { opacity: 0, animation: `tosPop .26s ease-out ${delay.toFixed(2)}s forwards`, transformBox: "fill-box", transformOrigin: "center" }}
+                                    />
+                                )
+                            })}
+                        </g>
+                    ))}
                 </svg>
                 <div className="px" style={{ display: "flex", gap: 14, alignItems: "baseline", color: TEXT, fontSize: 22, textTransform: "uppercase" }}>
                     <span>The Other Side</span>
