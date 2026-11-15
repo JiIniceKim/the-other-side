@@ -227,9 +227,9 @@ interface Profile {
 }
 
 const TEAM_OPTIONS: { id: TeamChoice; label: string }[] = [
-    { id: "carried", label: "I did their part too" },
-    { id: "reported", label: "I told the professor" },
-    { id: "slid", label: "I let it slide" },
+    { id: "carried", label: "I’d just do their part too" },
+    { id: "reported", label: "I’d tell the professor" },
+    { id: "slid", label: "I’d let it slide" },
 ]
 const COMFORTS = ["late-night ramen", "cat videos", "long walks", "old sitcoms", "iced coffee", "gaming till 2AM"]
 const NAME_IDEAS = ["night.owl_27", "quiet.reader", "coffee.n.code", "sunday.walker", "pixel.person", "late.bloomer"]
@@ -2132,13 +2132,15 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
     const [name, setName] = useState("")
     const [idea] = useState(() => NAME_IDEAS[Math.floor(Math.random() * NAME_IDEAS.length)])
     const [team, setTeam] = useState<TeamChoice | null>(null)
+    const [comfort, setComfort] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     useEffect(() => {
         if (step === 0) window.setTimeout(() => inputRef.current?.focus(), 400)
     }, [step])
     const clean = (v: string) => v.toLowerCase().replace(/[^a-z0-9._]/g, "").slice(0, 18)
-    const finish = (comfort: string) => onDone({ name: clean(name) || idea, team: team || "reported", comfort })
-    const titles = ["Create your profile", "Group project. One teammate did nothing. You…", "Your comfort thing?"]
+    const finish = (t: TeamChoice) => onDone({ name: clean(name) || idea, team: t, comfort: comfort || COMFORTS[0] })
+    // a casual sign-up: who you are → what you like → one small "what if"
+    const titles = ["Pick a username", "Tell us about you. What do you like?", "Group project. One teammate did nothing. What would you do?"]
     return (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", padding: "22px 18px 18px", color: TEXT }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
@@ -2156,7 +2158,6 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
             </div>
             <AnimatePresence mode="wait" initial={false}>
                 <motion.div key={step} initial={{ opacity: 0, x: reduce ? 0 : 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: reduce ? 0 : -24 }} transition={{ duration: 0.3 }} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-                    <p className="px" style={{ margin: "0 0 8px", color: BLUE_GLOW, fontSize: 12, letterSpacing: ".14em", textTransform: "uppercase" }}>Before you judge someone else</p>
                     <h2 style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 22px", letterSpacing: "-0.02em" }}>{titles[step]}</h2>
                     {step === 0 && (
                         <form
@@ -2181,13 +2182,25 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
                         </form>
                     )}
                     {step === 1 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                            {COMFORTS.map((c) => (
+                                <button key={c} onClick={() => {
+                                        setComfort(c)
+                                        window.setTimeout(() => setStep(2), reduce ? 0 : 180)
+                                    }} className="ghost" aria-pressed={comfort === c} style={{ background: comfort === c ? "rgba(110,123,255,.2)" : undefined, borderColor: comfort === c ? BLUE_GLOW : undefined, borderRadius: 999, minHeight: 46, padding: "8px 16px" }}>
+                                    {c}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {step === 2 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                             {TEAM_OPTIONS.map((o) => (
                                 <button
                                     key={o.id}
                                     onClick={() => {
                                         setTeam(o.id)
-                                        window.setTimeout(() => setStep(2), reduce ? 0 : 180)
+                                        window.setTimeout(() => finish(o.id), reduce ? 0 : 180)
                                     }}
                                     className="ghost"
                                     aria-pressed={team === o.id}
@@ -2198,18 +2211,9 @@ function ProfileSetup(props: { initial: Profile | null; onDone: (p: Profile) => 
                             ))}
                         </div>
                     )}
-                    {step === 2 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                            {COMFORTS.map((c) => (
-                                <button key={c} onClick={() => finish(c)} className="ghost" style={{ borderRadius: 999, minHeight: 46, padding: "8px 16px" }}>
-                                    {c}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </motion.div>
             </AnimatePresence>
-            <p style={{ margin: "16px 0 0", fontSize: 11, color: "#8d909b", textAlign: "center" }}>This sets your starting point. It stays on this device; nothing is sent.</p>
+            <p style={{ margin: "16px 0 0", fontSize: 11, color: "#8d909b", textAlign: "center" }}>Stays on this device. Nothing is sent.</p>
         </div>
     )
 }
